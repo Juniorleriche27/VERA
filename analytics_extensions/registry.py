@@ -1,11 +1,13 @@
 from analytics_extensions.anova import OneWayANOVA
 from analytics_extensions.nonparametric import MannWhitneyUTest
 from analytics_extensions.kruskal import KruskalWallisTest
+from analytics_extensions.multiple_testing import MultipleTestingCorrection
 
 HACKATHON_ANALYTICS = (
     OneWayANOVA,
     MannWhitneyUTest,
     KruskalWallisTest,
+    MultipleTestingCorrection,
 )
 
 
