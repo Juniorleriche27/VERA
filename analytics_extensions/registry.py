@@ -4,6 +4,7 @@ from analytics_extensions.kruskal import KruskalWallisTest
 from analytics_extensions.multiple_testing import MultipleTestingCorrection
 from analytics_extensions.extreme_value import ExtremeValueTailRisk
 from analytics_extensions.causal_impact import BayesianStructuralCausalImpact
+from analytics_extensions.transfer_entropy import DirectedTransferEntropy
 
 HACKATHON_ANALYTICS = (
     OneWayANOVA,
@@ -12,6 +13,7 @@ HACKATHON_ANALYTICS = (
     MultipleTestingCorrection,
     ExtremeValueTailRisk,
     BayesianStructuralCausalImpact,
+    DirectedTransferEntropy,
 )
 
 
