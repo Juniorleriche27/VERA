@@ -14,5 +14,10 @@ Current hackathon analytical extensions:
 
 - #96 
 - #97 
+- #98 
+- #99 
+- #100 
+- #101 
+- #102 
 
 The pre-existing engine and the hackathon extensions remain explicitly separated for auditability.
