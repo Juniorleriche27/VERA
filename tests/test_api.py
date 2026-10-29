@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from agent.tool_call_trace import ToolCallTrace
+from backend.config import AppSettings
 
 
 class FakePlanner:
@@ -20,10 +21,15 @@ class FakePlanner:
         return SimpleNamespace(traces=(trace,))
 
 
-def _client():
+def _client(settings=None):
     from backend.app import create_app
 
-    return TestClient(create_app(planner_factory=lambda: FakePlanner()))
+    return TestClient(
+        create_app(
+            planner_factory=lambda: FakePlanner(),
+            settings=settings,
+        )
+    )
 
 
 def _upload(client):
@@ -147,3 +153,52 @@ def test_blank_question_is_rejected():
         json={"dataset_id": dataset["dataset_id"], "question": "   "},
     )
     assert response.status_code == 422
+
+
+def test_cors_allows_configured_frontend_origin():
+    client = _client(
+        AppSettings(cors_origins=("https://vera.example",))
+    )
+    response = client.options(
+        "/datasets",
+        headers={
+            "Origin": "https://vera.example",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://vera.example"
+
+
+def test_upload_rejects_dataset_larger_than_configured_limit():
+    client = _client(
+        AppSettings(max_upload_bytes=5)
+    )
+    response = client.post(
+        "/datasets",
+        files={"file": ("tiny.csv", b"a,b\n1,2\n", "text/csv")},
+    )
+    assert response.status_code == 413
+    assert "maximum size" in response.json()["detail"]
+
+
+def test_settings_load_environment_values(monkeypatch):
+    monkeypatch.setenv("VERA_APP_NAME", "VERA Production")
+    monkeypatch.setenv("VERA_APP_VERSION", "1.2.3")
+    monkeypatch.setenv("VERA_ENV", "production")
+    monkeypatch.setenv(
+        "VERA_CORS_ORIGINS",
+        "https://app.vera.example,https://admin.vera.example",
+    )
+    monkeypatch.setenv("VERA_MAX_UPLOAD_BYTES", "12345")
+
+    settings = AppSettings.from_env()
+
+    assert settings.app_name == "VERA Production"
+    assert settings.app_version == "1.2.3"
+    assert settings.environment == "production"
+    assert settings.cors_origins == (
+        "https://app.vera.example",
+        "https://admin.vera.example",
+    )
+    assert settings.max_upload_bytes == 12345

@@ -7,10 +7,12 @@ from uuid import uuid4
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from fastapi.encoders import jsonable_encoder
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from agent.groq_planner import GroqModelPlanner
 from agent.pipeline import VerifiedAnalyticsPipeline
+from backend.config import AppSettings, get_settings
 
 
 class AnalysisRequest(BaseModel):
@@ -56,13 +58,25 @@ def _brief_payload(brief: Any) -> Any:
 
 def create_app(
     planner_factory: Callable[[], Any] | None = None,
+    settings: AppSettings | None = None,
 ) -> FastAPI:
+    config = settings or get_settings()
     app = FastAPI(
-        title="VERA API",
-        version="0.1.0",
+        title=config.app_name,
+        version=config.app_version,
         description="Verifiable Analytics Agent API",
     )
 
+    if config.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(config.cors_origins),
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+    app.state.settings = config
     app.state.datasets = {}
     app.state.analyses = {}
     app.state.planner_factory = planner_factory or GroqModelPlanner
@@ -81,6 +95,14 @@ def create_app(
             )
 
         raw = await file.read()
+        if len(raw) > config.max_upload_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    "Uploaded dataset exceeds the configured maximum size of "
+                    f"{config.max_upload_bytes} bytes."
+                ),
+            )
         if not raw:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
