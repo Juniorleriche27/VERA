@@ -1,0 +1,6 @@
+koryxa-data-analysis-engine @ git+https://github.com/Juniorleriche27/data-analysis-engine.git@76d6a1482aca8b51965a4e10f2591603bcce05c4
+pandas==3.1.0
+fastapi==0.162.0
+uvicorn==0.54.0
+python-multipart>=0.0.20,<1
+openai==3.39.0
