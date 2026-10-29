@@ -280,3 +280,47 @@ def test_pipeline_requires_positive_max_steps():
             replanner=FakeReplanner(),
             max_steps=0,
         )
+
+def test_real_anova_pipeline_keeps_parameters_and_bindings_separate():
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    from agent.pipeline import VerifiedAnalyticsPipeline
+    from agent.tool_call_trace import ToolCallTrace
+
+    class FixedPlanner:
+        def plan(self, *args, **kwargs):
+            trace = ToolCallTrace(
+                call_id="regression-anova",
+                tool="one_way_anova",
+                objective="Compare average sales across regions.",
+                reason="Regression test for Binder to AnalyticsExecutor contract.",
+                _parameters_json='{"alpha":0.05}',
+                _bindings_json='{"region":"region","sales":"sales"}',
+            )
+            return SimpleNamespace(traces=(trace,))
+
+    dataset = pd.DataFrame(
+        {
+            "region": ["North"] * 5 + ["South"] * 5 + ["West"] * 5,
+            "sales": [10, 11, 12, 13, 14, 20, 21, 22, 23, 24, 30, 31, 32, 33, 34],
+        }
+    )
+    context = {
+        "row_count": len(dataset),
+        "columns": [
+            {"name": "region", "role": "dimension", "dtype": "string"},
+            {"name": "sales", "role": "measure", "dtype": "numeric"},
+        ],
+    }
+
+    result = VerifiedAnalyticsPipeline(FixedPlanner()).run(
+        "Are average sales significantly different across the three regions?",
+        dataset=dataset,
+        dataset_context=context,
+    )
+
+    assert result.steps
+    assert result.steps[0].trace.status.value == "completed"
+    assert result.steps[0].trace.execution_error == ""

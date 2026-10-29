@@ -153,9 +153,19 @@ class VerifiedAnalyticsPipeline:
 
             try:
                 bound = self.binder.bind(trace, dataset)
-                kwargs = bound.executor_kwargs()
                 running = trace.mark_running()
-                deterministic_result = self.analytics.execute(trace.tool, **kwargs)
+
+                if hasattr(bound, "parameters") and hasattr(bound, "bindings"):
+                    deterministic_result = self.analytics.execute(
+                        trace.tool,
+                        parameters=bound.parameters,
+                        bindings=bound.bindings,
+                    )
+                else:
+                    deterministic_result = self.analytics.execute(
+                        trace.tool,
+                        **bound.executor_kwargs(),
+                    )
                 completed = running.complete(deterministic_result)
             except Exception as exc:
                 failed = trace.fail(str(exc))
