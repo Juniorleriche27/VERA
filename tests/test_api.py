@@ -102,6 +102,10 @@ def test_analysis_runs_verified_pipeline_and_returns_brief_visual_and_steps():
     payload = response.json()
     assert payload["succeeded"] is True
     assert payload["final_status"] == "verified"
+    assert (
+        payload["steps"][0]["report"]["trace_hash"]
+        == payload["steps"][0]["trace"]["trace_hash"]
+    )
     assert payload["steps"][0]["trace"]["tool"] == "one_way_anova"
     assert payload["decision_brief"]["headline"]
     assert len(payload["visualizations"]) == 1

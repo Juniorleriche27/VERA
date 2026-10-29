@@ -269,7 +269,14 @@ class DeterministicVerifier:
             report.status,
             next_decision=report.next_decision,
         )
-        return verified_trace, report
+        final_report = VerificationReport(
+            call_id=report.call_id,
+            trace_hash=verified_trace.trace_hash,
+            status=report.status,
+            next_decision=report.next_decision,
+            checks=report.checks,
+        )
+        return verified_trace, final_report
 
     def _check_missingness(
         self, result: Mapping[str, Any]
