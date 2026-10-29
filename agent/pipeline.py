@@ -84,6 +84,11 @@ class PipelineResult:
             "succeeded": self.succeeded,
         }
 
+    def build_decision_brief(self) -> Any:
+        from agent.decision_brief import VerifiedDecisionBriefBuilder
+
+        return VerifiedDecisionBriefBuilder().build(self)
+
 
 class VerifiedAnalyticsPipeline:
     """

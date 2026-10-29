@@ -324,3 +324,25 @@ def test_real_anova_pipeline_keeps_parameters_and_bindings_separate():
     assert result.steps
     assert result.steps[0].trace.status.value == "completed"
     assert result.steps[0].trace.execution_error == ""
+
+
+def test_pipeline_result_builds_decision_brief_through_verified_builder(monkeypatch):
+    from agent.pipeline import PipelineResult
+    import agent.decision_brief as decision_brief
+
+    sentinel = object()
+
+    class FakeBuilder:
+        def build(self, pipeline_result):
+            assert pipeline_result.question == "Why did sales change?"
+            return sentinel
+
+    monkeypatch.setattr(decision_brief, "VerifiedDecisionBriefBuilder", FakeBuilder)
+
+    result = PipelineResult(
+        question="Why did sales change?",
+        planning=None,
+        steps=(),
+    )
+
+    assert result.build_decision_brief() is sentinel
