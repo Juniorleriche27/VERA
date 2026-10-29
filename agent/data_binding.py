@@ -80,18 +80,47 @@ _VALUE_HINTS = (
 )
 
 
+
+def _frame_column_lookup(frame: pd.DataFrame) -> dict[str, list[str]]:
+    lookup: dict[str, list[str]] = {}
+    for column in frame.columns:
+        name = str(column)
+        lookup.setdefault(name.casefold(), []).append(name)
+    return lookup
+
+
+def _resolve_frame_column_reference(
+    frame: pd.DataFrame,
+    candidate: Any,
+) -> str | None:
+    if not isinstance(candidate, str):
+        return None
+    raw = candidate.strip()
+    if not raw:
+        return None
+    if raw in frame.columns:
+        return raw
+
+    matches = _frame_column_lookup(frame).get(raw.casefold(), [])
+    return matches[0] if len(matches) == 1 else None
+
+
 def _semantic_column_refs(
     frame: pd.DataFrame,
     semantic: Mapping[str, Any],
 ) -> list[tuple[str, str]]:
     refs: list[tuple[str, str]] = []
     seen: set[str] = set()
-    for key, value in semantic.items():
-        if isinstance(value, str) and value in frame.columns and value not in seen:
-            refs.append((str(key).strip().lower(), value))
-            seen.add(value)
-    return refs
 
+    for key, value in semantic.items():
+        resolved = _resolve_frame_column_reference(frame, value)
+        if resolved is None:
+            resolved = _resolve_frame_column_reference(frame, key)
+        if resolved is not None and resolved not in seen:
+            refs.append((str(key).strip().lower(), resolved))
+            seen.add(resolved)
+
+    return refs
 
 def _hinted_column(
     refs: Sequence[tuple[str, str]],
@@ -108,13 +137,26 @@ def _hinted_column(
     return unique[0] if len(unique) == 1 else None
 
 
+
 def _resolve_grouped_columns(
     frame: pd.DataFrame,
     semantic: Mapping[str, Any],
 ) -> tuple[str, str]:
-    group_candidate = semantic.get("grouping_column") or semantic.get("group_column")
-    value_candidate = semantic.get("value_column") or semantic.get("measure_column")
+    group_candidate = (
+        semantic.get("grouping_column")
+        or semantic.get("group_column")
+        or semantic.get("group_col")
+    )
+    value_candidate = (
+        semantic.get("value_column")
+        or semantic.get("measure_column")
+        or semantic.get("value_col")
+        or semantic.get("metric_column")
+    )
     refs = _semantic_column_refs(frame, semantic)
+
+    group_candidate = _resolve_frame_column_reference(frame, group_candidate)
+    value_candidate = _resolve_frame_column_reference(frame, value_candidate)
 
     if group_candidate is None:
         group_candidate = _hinted_column(refs, _GROUP_HINTS)
@@ -126,24 +168,44 @@ def _resolve_grouped_columns(
         )
 
     if group_candidate is None:
-        categorical = [
+        categorical_refs = [
             column
             for _, column in refs
             if column != value_candidate
             and not pd.api.types.is_numeric_dtype(frame[column])
         ]
-        if len(categorical) == 1:
-            group_candidate = categorical[0]
+        if len(categorical_refs) == 1:
+            group_candidate = categorical_refs[0]
 
     if value_candidate is None:
-        numeric = [
+        numeric_refs = [
             column
             for _, column in refs
             if column != group_candidate
             and pd.api.types.is_numeric_dtype(frame[column])
         ]
-        if len(numeric) == 1:
-            value_candidate = numeric[0]
+        if len(numeric_refs) == 1:
+            value_candidate = numeric_refs[0]
+
+    if group_candidate is None:
+        categorical_frame = [
+            str(column)
+            for column in frame.columns
+            if str(column) != value_candidate
+            and not pd.api.types.is_numeric_dtype(frame[column])
+        ]
+        if len(categorical_frame) == 1:
+            group_candidate = categorical_frame[0]
+
+    if value_candidate is None:
+        numeric_frame = [
+            str(column)
+            for column in frame.columns
+            if str(column) != group_candidate
+            and pd.api.types.is_numeric_dtype(frame[column])
+        ]
+        if len(numeric_frame) == 1:
+            value_candidate = numeric_frame[0]
 
     if group_candidate is None or value_candidate is None:
         raise DataBindingError(
@@ -160,40 +222,57 @@ def _resolve_grouped_columns(
     return group_column, value_column
 
 
+
 def _resolve_value_column(
     frame: pd.DataFrame,
     semantic: Mapping[str, Any],
 ) -> str:
-    candidate = (
+    raw_candidate = (
         semantic.get("value_column")
         or semantic.get("measure_column")
+        or semantic.get("value_col")
+        or semantic.get("metric_column")
         or semantic.get("column")
     )
     refs = _semantic_column_refs(frame, semantic)
+
+    candidate = _resolve_frame_column_reference(frame, raw_candidate)
+    if raw_candidate is not None and candidate is None:
+        raise DataBindingError(
+            f"Unknown dataset column: {raw_candidate!r}."
+        )
 
     if candidate is None:
         candidate = _hinted_column(refs, _VALUE_HINTS)
 
     if candidate is None:
-        numeric = [
+        numeric_refs = [
             column
             for _, column in refs
             if pd.api.types.is_numeric_dtype(frame[column])
         ]
-        if len(numeric) == 1:
-            candidate = numeric[0]
+        if len(numeric_refs) == 1:
+            candidate = numeric_refs[0]
 
     if candidate is None and len(refs) == 1:
         candidate = refs[0][1]
 
     if candidate is None:
+        numeric_frame = [
+            str(column)
+            for column in frame.columns
+            if pd.api.types.is_numeric_dtype(frame[column])
+        ]
+        if len(numeric_frame) == 1:
+            candidate = numeric_frame[0]
+
+    if candidate is None:
         raise DataBindingError(
-            "Could not deterministically resolve a value column. "
-            "Provide a semantic 'value_column' binding."
+            "Could not deterministically resolve numeric analysis column. "
+            "Provide a semantic binding for 'value_column'."
         )
 
     return _column(frame, candidate, "value_column")
-
 
 @dataclass(frozen=True, slots=True)
 class BoundToolCall:

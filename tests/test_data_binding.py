@@ -237,3 +237,72 @@ def test_grouped_binding_rejects_ambiguous_numeric_columns_without_hints():
             _trace("one_way_anova", {"x": "a", "y": "b"}),
             frame,
         )
+
+
+def test_grouped_resolution_accepts_case_insensitive_semantic_values():
+    import pandas as pd
+    from agent.data_binding import _resolve_grouped_columns
+
+    frame = pd.DataFrame({"region": ["N", "S"], "sales": [1.0, 2.0]})
+    assert _resolve_grouped_columns(
+        frame,
+        {"GROUP_COL": "REGION", "VALUE_COL": "SALES"},
+    ) == ("region", "sales")
+
+
+def test_grouped_resolution_uses_dtype_when_binding_keys_are_generic():
+    import pandas as pd
+    from agent.data_binding import _resolve_grouped_columns
+
+    frame = pd.DataFrame({"region": ["N", "S"], "sales": [1.0, 2.0]})
+    assert _resolve_grouped_columns(
+        frame,
+        {"x": "region", "y": "sales"},
+    ) == ("region", "sales")
+
+
+def test_grouped_resolution_can_use_column_names_as_binding_keys():
+    import pandas as pd
+    from agent.data_binding import _resolve_grouped_columns
+
+    frame = pd.DataFrame({"region": ["N", "S"], "sales": [1.0, 2.0]})
+    assert _resolve_grouped_columns(
+        frame,
+        {"region": "dimension", "sales": "measure"},
+    ) == ("region", "sales")
+
+
+def test_grouped_resolution_uses_unique_dataframe_schema_when_bindings_are_missing():
+    import pandas as pd
+    from agent.data_binding import _resolve_grouped_columns
+
+    frame = pd.DataFrame({"region": ["N", "S"], "sales": [1.0, 2.0]})
+    assert _resolve_grouped_columns(frame, {}) == ("region", "sales")
+
+
+def test_grouped_resolution_refuses_ambiguous_numeric_schema():
+    import pandas as pd
+    import pytest
+    from agent.data_binding import DataBindingError, _resolve_grouped_columns
+
+    frame = pd.DataFrame(
+        {"region": ["N", "S"], "sales": [1.0, 2.0], "profit": [0.2, 0.4]}
+    )
+    with pytest.raises(DataBindingError):
+        _resolve_grouped_columns(frame, {})
+
+
+def test_value_resolution_accepts_case_insensitive_column_reference():
+    import pandas as pd
+    from agent.data_binding import _resolve_value_column
+
+    frame = pd.DataFrame({"sales": [1.0, 2.0]})
+    assert _resolve_value_column(frame, {"value_col": "SALES"}) == "sales"
+
+
+def test_value_resolution_uses_unique_numeric_dataframe_schema():
+    import pandas as pd
+    from agent.data_binding import _resolve_value_column
+
+    frame = pd.DataFrame({"region": ["N", "S"], "sales": [1.0, 2.0]})
+    assert _resolve_value_column(frame, {}) == "sales"
