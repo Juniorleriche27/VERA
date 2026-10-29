@@ -1,6 +1,8 @@
 
 from __future__ import annotations
 
+from agent.tool_catalog_selector import ToolCatalogSelector
+
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, Sequence
 
@@ -100,6 +102,7 @@ class VerifiedAnalyticsPipeline:
         analytics: AnalyticsToolExecutor | None = None,
         verifier: DeterministicVerifier | None = None,
         replanner: SelfCorrectionPlanner | None = None,
+        tool_selector: ToolCatalogSelector | None = None,
         max_steps: int = 5,
     ) -> None:
         if not isinstance(max_steps, int) or isinstance(max_steps, bool) or max_steps < 1:
@@ -109,6 +112,7 @@ class VerifiedAnalyticsPipeline:
         self.analytics = analytics or AnalyticsToolExecutor()
         self.verifier = verifier or DeterministicVerifier()
         self.replanner = replanner or SelfCorrectionPlanner()
+        self.tool_selector = tool_selector or ToolCatalogSelector(max_tools=10)
         self.max_steps = max_steps
 
     def run(
@@ -123,10 +127,16 @@ class VerifiedAnalyticsPipeline:
         if not isinstance(dataset_context, Mapping):
             raise PipelineError("'dataset_context' must be a mapping.")
 
+        safe_context = dict(dataset_context)
+        selection = self.tool_selector.select(
+            question.strip(),
+            dataset_context=safe_context,
+            tool_catalog=self.analytics.available_tools(),
+        )
         planning = self.planner.plan(
             question.strip(),
-            dataset_context=dict(dataset_context),
-            tool_catalog=self.analytics.available_tools(),
+            dataset_context=safe_context,
+            tool_catalog=list(selection.tools),
         )
         planned_traces = tuple(getattr(planning, "traces", ()) or ())
         if not all(isinstance(trace, ToolCallTrace) for trace in planned_traces):
