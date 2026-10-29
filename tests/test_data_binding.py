@@ -175,3 +175,65 @@ def test_executor_kwargs_reject_parameter_binding_overlap():
 
     with pytest.raises(DataBindingError, match="overlap"):
         call.executor_kwargs()
+
+
+
+def test_anova_accepts_model_column_name_bindings():
+    frame = pd.DataFrame(
+        {
+            "region": ["North", "North", "South", "South", "West", "West"],
+            "sales": [10, 12, 20, 22, 30, 32],
+        }
+    )
+    bound = DatasetBinder().bind(
+        _trace("one_way_anova", {"region": "region", "sales": "sales"}),
+        frame,
+    )
+
+    assert bound.bindings == {
+        "data": {
+            "North": [10, 12],
+            "South": [20, 22],
+            "West": [30, 32],
+        }
+    }
+
+
+def test_grouped_binding_infers_one_categorical_and_one_numeric_column():
+    frame = pd.DataFrame(
+        {
+            "market": ["A", "A", "B", "B"],
+            "profit": [1.0, 2.0, 8.0, 9.0],
+        }
+    )
+    bound = DatasetBinder().bind(
+        _trace("kruskal_wallis_test", {"x": "market", "y": "profit"}),
+        frame,
+    )
+
+    assert bound.bindings["data"] == {"A": [1.0, 2.0], "B": [8.0, 9.0]}
+
+
+def test_descriptive_statistics_accepts_model_column_name_binding():
+    frame = pd.DataFrame({"sales": [1.0, 2.0, 3.0]})
+    bound = DatasetBinder().bind(
+        _trace("descriptive_statistics", {"sales": "sales"}),
+        frame,
+    )
+
+    assert bound.bindings == {"values": [1.0, 2.0, 3.0]}
+
+
+def test_grouped_binding_rejects_ambiguous_numeric_columns_without_hints():
+    frame = pd.DataFrame(
+        {
+            "a": [1, 1, 2, 2],
+            "b": [10, 20, 30, 40],
+        }
+    )
+
+    with pytest.raises(DataBindingError, match="Could not deterministically resolve"):
+        DatasetBinder().bind(
+            _trace("one_way_anova", {"x": "a", "y": "b"}),
+            frame,
+        )

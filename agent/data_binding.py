@@ -56,6 +56,145 @@ def _column(frame: pd.DataFrame, name: Any, field: str) -> str:
     return column
 
 
+_GROUP_HINTS = (
+    "group",
+    "grouping",
+    "category",
+    "segment",
+    "region",
+    "class",
+    "treatment",
+    "cohort",
+)
+_VALUE_HINTS = (
+    "value",
+    "measure",
+    "sales",
+    "revenue",
+    "amount",
+    "price",
+    "score",
+    "metric",
+    "outcome",
+    "target",
+)
+
+
+def _semantic_column_refs(
+    frame: pd.DataFrame,
+    semantic: Mapping[str, Any],
+) -> list[tuple[str, str]]:
+    refs: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for key, value in semantic.items():
+        if isinstance(value, str) and value in frame.columns and value not in seen:
+            refs.append((str(key).strip().lower(), value))
+            seen.add(value)
+    return refs
+
+
+def _hinted_column(
+    refs: Sequence[tuple[str, str]],
+    hints: Sequence[str],
+    *,
+    exclude: str | None = None,
+) -> str | None:
+    matches = [
+        column
+        for key, column in refs
+        if column != exclude and any(hint in key.lower() for hint in hints)
+    ]
+    unique = list(dict.fromkeys(matches))
+    return unique[0] if len(unique) == 1 else None
+
+
+def _resolve_grouped_columns(
+    frame: pd.DataFrame,
+    semantic: Mapping[str, Any],
+) -> tuple[str, str]:
+    group_candidate = semantic.get("grouping_column") or semantic.get("group_column")
+    value_candidate = semantic.get("value_column") or semantic.get("measure_column")
+    refs = _semantic_column_refs(frame, semantic)
+
+    if group_candidate is None:
+        group_candidate = _hinted_column(refs, _GROUP_HINTS)
+    if value_candidate is None:
+        value_candidate = _hinted_column(
+            refs,
+            _VALUE_HINTS,
+            exclude=group_candidate if isinstance(group_candidate, str) else None,
+        )
+
+    if group_candidate is None:
+        categorical = [
+            column
+            for _, column in refs
+            if column != value_candidate
+            and not pd.api.types.is_numeric_dtype(frame[column])
+        ]
+        if len(categorical) == 1:
+            group_candidate = categorical[0]
+
+    if value_candidate is None:
+        numeric = [
+            column
+            for _, column in refs
+            if column != group_candidate
+            and pd.api.types.is_numeric_dtype(frame[column])
+        ]
+        if len(numeric) == 1:
+            value_candidate = numeric[0]
+
+    if group_candidate is None or value_candidate is None:
+        raise DataBindingError(
+            "Could not deterministically resolve grouped analysis columns. "
+            "Provide semantic bindings for 'grouping_column' and 'value_column'."
+        )
+
+    group_column = _column(frame, group_candidate, "grouping_column")
+    value_column = _column(frame, value_candidate, "value_column")
+    if group_column == value_column:
+        raise DataBindingError(
+            "'grouping_column' and 'value_column' must reference different columns."
+        )
+    return group_column, value_column
+
+
+def _resolve_value_column(
+    frame: pd.DataFrame,
+    semantic: Mapping[str, Any],
+) -> str:
+    candidate = (
+        semantic.get("value_column")
+        or semantic.get("measure_column")
+        or semantic.get("column")
+    )
+    refs = _semantic_column_refs(frame, semantic)
+
+    if candidate is None:
+        candidate = _hinted_column(refs, _VALUE_HINTS)
+
+    if candidate is None:
+        numeric = [
+            column
+            for _, column in refs
+            if pd.api.types.is_numeric_dtype(frame[column])
+        ]
+        if len(numeric) == 1:
+            candidate = numeric[0]
+
+    if candidate is None and len(refs) == 1:
+        candidate = refs[0][1]
+
+    if candidate is None:
+        raise DataBindingError(
+            "Could not deterministically resolve a value column. "
+            "Provide a semantic 'value_column' binding."
+        )
+
+    return _column(frame, candidate, "value_column")
+
+
 @dataclass(frozen=True, slots=True)
 class BoundToolCall:
     call_id: str
@@ -116,16 +255,7 @@ class DatasetBinder:
         frame: pd.DataFrame,
         semantic: Mapping[str, Any],
     ) -> dict[str, Any]:
-        group_column = _column(
-            frame,
-            semantic.get("grouping_column") or semantic.get("group_column"),
-            "grouping_column",
-        )
-        value_column = _column(
-            frame,
-            semantic.get("value_column") or semantic.get("measure_column"),
-            "value_column",
-        )
+        group_column, value_column = _resolve_grouped_columns(frame, semantic)
 
         groups: dict[str, list[Any]] = {}
         for group_value, value in zip(frame[group_column], frame[value_column]):
@@ -148,13 +278,7 @@ class DatasetBinder:
         frame: pd.DataFrame,
         semantic: Mapping[str, Any],
     ) -> dict[str, Any]:
-        value_column = _column(
-            frame,
-            semantic.get("value_column")
-            or semantic.get("measure_column")
-            or semantic.get("column"),
-            "value_column",
-        )
+        value_column = _resolve_value_column(frame, semantic)
         return {"values": [_native(value) for value in frame[value_column]]}
 
     def _bind_mann_whitney(
@@ -162,16 +286,7 @@ class DatasetBinder:
         frame: pd.DataFrame,
         semantic: Mapping[str, Any],
     ) -> dict[str, Any]:
-        group_column = _column(
-            frame,
-            semantic.get("grouping_column") or semantic.get("group_column"),
-            "grouping_column",
-        )
-        value_column = _column(
-            frame,
-            semantic.get("value_column") or semantic.get("measure_column"),
-            "value_column",
-        )
+        group_column, value_column = _resolve_grouped_columns(frame, semantic)
 
         requested_a = semantic.get("group_a")
         requested_b = semantic.get("group_b")
