@@ -9,3 +9,5 @@ from agent.replanning import ReplanDirective, ReplanningError, SelfCorrectionPla
 from agent.runtime import AgentRuntime, AgentRuntimeError, RuntimeResult, RuntimeStep, ToolExecutor
 
 __all__ = ["AnalyticsExecutorError", "AnalyticsToolDescriptor", "AnalyticsToolExecutor", "BoundToolCall", "DataBindingError", "DatasetBinder", "ToolCatalogSelector", "ToolSelection", "ToolSelectionError", "GroqModelError", "GroqModelPlanner", "MetaModelError", "MetaModelPlanner", "MetaPlanningResult", "build_meta_tools", "PipelineError", "PipelineResult", "PipelineStep", "VerifiedAnalyticsPipeline", "ToolCallTrace", "ToolCallTraceError", "TraceStatus", "VerificationStatus", "ReplanDirective", "ReplanningError", "SelfCorrectionPlanner", "AgentRuntime", "AgentRuntimeError", "RuntimeResult", "RuntimeStep", "ToolExecutor"]
+from agent.decision_brief import DecisionBrief, DecisionBriefError, EvidenceItem, EvidencePackage, VerifiedDecisionBriefBuilder
+__all__ += ["DecisionBrief", "DecisionBriefError", "EvidenceItem", "EvidencePackage", "VerifiedDecisionBriefBuilder"]
