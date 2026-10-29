@@ -346,3 +346,34 @@ def test_pipeline_result_builds_decision_brief_through_verified_builder(monkeypa
     )
 
     assert result.build_decision_brief() is sentinel
+
+
+def test_pipeline_result_builds_visualizations_from_verified_evidence(monkeypatch):
+    from types import SimpleNamespace
+
+    from agent.pipeline import PipelineResult
+    import agent.decision_brief as decision_brief
+    import visualization.spec as visualization_spec
+
+    evidence = object()
+    visualizations = (object(),)
+
+    class FakeDecisionBuilder:
+        def build(self, pipeline_result):
+            return SimpleNamespace(evidence=evidence)
+
+    class FakeVisualizationBuilder:
+        def build(self, received_evidence):
+            assert received_evidence is evidence
+            return visualizations
+
+    monkeypatch.setattr(decision_brief, "VerifiedDecisionBriefBuilder", FakeDecisionBuilder)
+    monkeypatch.setattr(visualization_spec, "VerifiedVisualizationBuilder", FakeVisualizationBuilder)
+
+    result = PipelineResult(
+        question="Compare sales",
+        planning=None,
+        steps=(),
+    )
+
+    assert result.build_visualizations() is visualizations

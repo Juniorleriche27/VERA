@@ -89,6 +89,12 @@ class PipelineResult:
 
         return VerifiedDecisionBriefBuilder().build(self)
 
+    def build_visualizations(self) -> Any:
+        from visualization.spec import VerifiedVisualizationBuilder
+
+        brief = self.build_decision_brief()
+        return VerifiedVisualizationBuilder().build(brief.evidence)
+
 
 class VerifiedAnalyticsPipeline:
     """
