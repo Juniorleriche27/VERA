@@ -106,6 +106,15 @@ The default API planner remains Groq. `MetaModelPlanner` is available for explic
 integration and uses `MODEL_API_KEY`; its configured endpoint and model still
 require a live provider check. Switching the API provider is not automatic.
 
+Groq currently uses `qwen/qwen3.8-27b`, the `system` instruction role,
+`parallel_tool_calls=True` and temperature zero. Planning uses at most four
+responses and four analytical calls: it requests only uncovered objectives after
+a partial response, and rejects incomplete or duplicate plans. Simple questions
+do not automatically expand to four tools. No observations or execution results
+are sent back to the planner. Temporal profiles include timestamp bounds;
+repeated timestamps require an explicit model-selected aggregation. See the
+[live diagnosis and measured results](docs/GROQ_LIVE_DIAGNOSTIC.md).
+
 ---
 
 ## Quick start — frontend
@@ -134,7 +143,7 @@ cd ~/VERA
 PYTHONPATH=. python -m pytest -q -p no:asyncio
 ```
 
-The original baseline was **380 passed**; final audit regressions are included
+The original baseline was **380 passed**; final audit and live-planner regressions are included
 in the current suite (see `docs/FINAL_TECHNICAL_AUDIT.md`).
 
 ### Frontend

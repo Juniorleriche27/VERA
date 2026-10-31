@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime
 import json
 import os
 import re
 from typing import Any, Mapping, Sequence
 
 from agent.tool_call_trace import ToolCallTrace
+from agent.tool_catalog_selector import ToolCatalogSelector, _normalize
 
 
 class MetaModelError(RuntimeError):
@@ -24,6 +26,12 @@ _FORBIDDEN_CONTEXT_KEYS = {
     "values",
 }
 _TOOL_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
+_SCOPE_TOOLS = {
+    "temporal": {"linear_trend", "moving_average_trend", "additive_seasonal_decomposition"},
+    "change": {"mean_shift_change_point", "variance_shift_change_point"},
+    "groups": {"one_way_anova", "kruskal_wallis_test", "mann_whitney_u_test"},
+    "causal": {"bayesian_structural_causal_impact"},
+}
 
 
 def _json_clone(value: Any, field: str) -> Any:
@@ -89,11 +97,12 @@ def _safe_dataset_context(context: Mapping[str, Any]) -> dict[str, Any]:
         safe_columns: list[Any] = []
         text_fields = {"name", "dtype", "role"}
         count_fields = {"missing_count", "unique_count"}
+        temporal_fields = {"min_timestamp", "max_timestamp"}
         for column in cloned["columns"]:
             if isinstance(column, str):
                 safe_columns.append(_required_text(column, "column name"))
                 continue
-            if not isinstance(column, dict) or set(column) - (text_fields | count_fields | {"missing_rate"}):
+            if not isinstance(column, dict) or set(column) - (text_fields | count_fields | temporal_fields | {"missing_rate"}):
                 raise MetaModelError("Unsupported column metadata fields.")
             clean: dict[str, Any] = {"name": _required_text(column.get("name"), "column name")}
             for key in text_fields - {"name"}:
@@ -110,6 +119,17 @@ def _safe_dataset_context(context: Mapping[str, Any]) -> dict[str, Any]:
                 if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
                     raise MetaModelError("'missing_rate' must lie within [0, 1].")
                 clean["missing_rate"] = value
+            if temporal_fields.intersection(column):
+                if not temporal_fields <= column.keys() or column.get("role") != "time":
+                    raise MetaModelError("Temporal bounds require a time column and both ISO timestamps.")
+                try:
+                    lower = datetime.fromisoformat(column["min_timestamp"])
+                    upper = datetime.fromisoformat(column["max_timestamp"])
+                    if lower > upper:
+                        raise ValueError("Inverted temporal bounds")
+                except (TypeError, ValueError) as exc:
+                    raise MetaModelError("Temporal bounds must be ordered ISO timestamps.") from exc
+                clean.update({key: column[key] for key in temporal_fields})
             safe_columns.append(clean)
         safe["columns"] = safe_columns
     return safe
@@ -175,9 +195,8 @@ def _binding_guidance(name: str) -> str:
         )
     if name == "bayesian_structural_causal_impact":
         return (
-            'Use bindings {"time_column":"date","value_column":"sales",'
-            '"aggregation":"sum","intervention_date":"2026-09-01",'
-            '"control_columns":["control_sales"]} if these columns and date exist. '
+            "Bind time_column, value_column and an exact intervention_date justified by "
+            "the question and temporal metadata. Include control_columns only when suitable columns exist. "
             "Notice: intervention_date belongs strictly in bindings, not parameters. "
             "Place method settings such as credibility or prior_scale in parameters."
         )
@@ -336,7 +355,7 @@ _TOOL_SPECIFIC_SCHEMAS: dict[str, dict[str, Any]] = {
             },
             "intervention_date": {
                 "type": "string",
-                "description": "Exact ISO date where intervention begins (e.g. '2026-09-01').",
+                "description": "Exact ISO intervention start date justified by the question and temporal metadata; never invent a year.",
             },
             "control_columns": {
                 "type": "array",
@@ -367,8 +386,27 @@ _TOOL_SPECIFIC_SCHEMAS: dict[str, dict[str, Any]] = {
 }
 
 
+def _requires_aggregation(context: Mapping[str, Any], time_column: str) -> bool:
+    """Use cardinalities only; never inspect observations or select an aggregation."""
+    rows = context.get("row_count")
+    if not isinstance(rows, int):
+        return False
+    for column in context.get("columns", ()):
+        if not isinstance(column, Mapping) or column.get("name") != time_column:
+            continue
+        unique, missing = column.get("unique_count"), column.get("missing_count")
+        return (
+            column.get("role") == "time"
+            and isinstance(unique, int) and isinstance(missing, int)
+            and unique < rows - missing
+        )
+    return False
+
+
 def build_meta_tools(
     catalog: Sequence[Mapping[str, Any]],
+    *,
+    dataset_context: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Convert VERA analytics metadata into Meta function-tool definitions."""
 
@@ -390,6 +428,15 @@ def build_meta_tools(
         bindings_props: dict[str, Any] = dict(spec["bindings_properties"]) if spec else {}
         params_props: dict[str, Any] = dict(spec["parameters_properties"]) if spec else {}
         required_bindings: list[str] = list(spec.get("required_bindings", [])) if spec else []
+        context = dataset_context or {}
+        time_columns = [
+            column["name"] for column in context.get("columns", ())
+            if isinstance(column, Mapping) and column.get("role") == "time" and "name" in column
+        ]
+        if "aggregation" in bindings_props and time_columns and all(
+            _requires_aggregation(context, name) for name in time_columns
+        ):
+            required_bindings.append("aggregation")
 
         parameters_schema: dict[str, Any] = {
             "type": "object",
@@ -474,6 +521,8 @@ def _validate_semantic_tool_contract(
     parameters: Mapping[str, Any],
     bindings: Mapping[str, Any],
     call_id: str,
+    *,
+    dataset_context: Mapping[str, Any] | None = None,
 ) -> None:
     for key in parameters:
         if str(key).strip().lower() in _FORBIDDEN_CONTEXT_KEYS:
@@ -499,6 +548,13 @@ def _validate_semantic_tool_contract(
             raise MetaModelError(
                 f"Tool call {call_id!r} specifies invalid aggregation {agg!r}; must be 'sum' or 'mean'."
             )
+    if (
+        _requires_aggregation(dataset_context or {}, bindings.get("time_column", ""))
+        and "aggregation" not in bindings
+    ):
+        raise MetaModelError(
+            f"Tool call {call_id!r} requires explicit aggregation for repeated timestamps."
+        )
 
     # Causal impact rules:
     if tool == "bayesian_structural_causal_impact":
@@ -644,6 +700,7 @@ class MetaPlanningResult:
     finish_reason: str
     model: str
     usage: dict[str, Any]
+    planning_turns: int = 1
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -652,6 +709,7 @@ class MetaPlanningResult:
             "finish_reason": self.finish_reason,
             "model": self.model,
             "usage": _json_clone(self.usage, "usage"),
+            "planning_turns": self.planning_turns,
         }
 
 
@@ -670,10 +728,27 @@ class MetaModelPlanner:
         model: str = DEFAULT_MODEL,
         parallel_tool_calls: bool = True,
         max_initial_calls: int = 4,
+        instruction_role: str = "developer",
+        max_planning_turns: int = 1,
+        temperature: float | None = None,
     ) -> None:
         if isinstance(max_initial_calls, bool) or not isinstance(max_initial_calls, int) or max_initial_calls < 1:
             raise MetaModelError("'max_initial_calls' must be a positive integer.")
         self.max_initial_calls = max_initial_calls
+        if isinstance(max_planning_turns, bool) or not isinstance(max_planning_turns, int) or not 1 <= max_planning_turns <= 4:
+            raise MetaModelError("'max_planning_turns' must be an integer between 1 and 4.")
+        self.max_planning_turns = max_planning_turns
+        if max_planning_turns > 1 and max_initial_calls > 4:
+            raise MetaModelError("Bounded planning accepts at most four total analytical calls.")
+        if temperature is not None and (
+            isinstance(temperature, bool) or not isinstance(temperature, (int, float))
+            or not 0 <= temperature <= 2
+        ):
+            raise MetaModelError("'temperature' must be a finite number between 0 and 2.")
+        self.temperature = temperature
+        if instruction_role not in {"developer", "system"}:
+            raise MetaModelError("'instruction_role' must be 'developer' or 'system'.")
+        self.instruction_role = instruction_role
         self.model = _required_text(model, "model")
         self.base_url = _required_text(base_url, "base_url")
         self.parallel_tool_calls = bool(parallel_tool_calls)
@@ -702,10 +777,80 @@ class MetaModelPlanner:
         tool_catalog: Sequence[Mapping[str, Any]],
     ) -> MetaPlanningResult:
         question_text = _required_text(question, "question")
+        context = _safe_dataset_context(dataset_context)
+        catalog = _normalized_catalog(tool_catalog)
+        if self.max_planning_turns == 1:
+            return self._plan_once(question_text, dataset_context=context, tool_catalog=catalog)
+        roles = {
+            col.get("role") for col in context.get("columns", ()) if isinstance(col, Mapping)
+        }
+        names = {item["name"] for item in catalog}
+        requested = ToolCatalogSelector._investigation_intents(_normalize(question_text), roles)
+        eligible = {"temporal", "change", "causal"} if {"time", "measure"} <= roles else set()
+        if {"dimension", "measure"} <= roles:
+            eligible.add("groups")
+        remaining = {
+            scope for scope in requested & eligible if _SCOPE_TOOLS[scope] & names
+        }
+        traces: list[ToolCallTrace] = []
+        usage: dict[str, Any] = {}
+        selected_catalog = catalog
+        note = ""
+        signatures: set[str] = set()
+        for turn in range(1, self.max_planning_turns + 1):
+            budget = self.max_initial_calls - len(traces)
+            if budget < 1:
+                break
+            result = self._plan_once(
+                question_text, dataset_context=context, tool_catalog=selected_catalog,
+                planning_note=note, call_budget=budget,
+            )
+            for key, value in result.usage.items():
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    usage[key] = usage.get(key, 0) + value
+            for trace in result.traces:
+                signature = json.dumps([trace.tool, trace.parameters, trace.bindings], sort_keys=True)
+                if signature in signatures:
+                    raise MetaModelError("Planner returned a duplicate analytical call.")
+                signatures.add(signature)
+                # Provider IDs can restart in each independent response. Scope
+                # them by planning turn; these are not execution descendants.
+                traces.append(replace(trace, call_id=f"planning-{turn}-{trace.call_id}"))
+                remaining -= {scope for scope, tools in _SCOPE_TOOLS.items() if trace.tool in tools}
+            if not remaining:
+                return replace(result, traces=tuple(traces), usage=usage, planning_turns=turn)
+            if not result.traces:
+                break  # Respect a clarification/refusal; do not invent a call.
+            selected_catalog = tuple(
+                item for item in catalog
+                if any(item["name"] in _SCOPE_TOOLS[scope] for scope in remaining)
+            )
+            note = (
+                "Planning continuation only; no tool has executed yet. Already selected tools: "
+                + json.dumps([trace.tool for trace in traces])
+                + ". Remaining analytical objectives: " + json.dumps(sorted(remaining))
+                + f". Select only justified complementary evidence, at most {self.max_initial_calls - len(traces)} calls. "
+                "Do not repeat selected analyses. Explain if an objective needs clarification instead."
+            )
+        raise MetaModelError(
+            "Planner did not cover the requested analytical objectives within its planning budget: "
+            + ", ".join(sorted(remaining))
+        )
+
+    def _plan_once(
+        self,
+        question: str,
+        *,
+        dataset_context: Mapping[str, Any],
+        tool_catalog: Sequence[Mapping[str, Any]],
+        planning_note: str = "",
+        call_budget: int | None = None,
+    ) -> MetaPlanningResult:
+        question_text = _required_text(question, "question")
         safe_context = _safe_dataset_context(dataset_context)
         normalized_catalog = _normalized_catalog(tool_catalog)
         allowed_names = {item["name"] for item in normalized_catalog}
-        tools = build_meta_tools(normalized_catalog)
+        tools = build_meta_tools(normalized_catalog, dataset_context=safe_context)
 
         developer_message = (
             "You are VERA's analytics planner. Decide which deterministic "
@@ -729,7 +874,13 @@ class MetaModelPlanner:
             "- Never guess or invent dates, columns, or values. Independent calls should "
             "have empty source_call_ids. For additive measures (sales, revenue) sum is "
             "appropriate; sum/mean must be deliberate. If no analysis is needed, "
-            "answer briefly instead of inventing a tool call."
+            "answer briefly instead of inventing a tool call. "
+            "Cover each independently answerable part of a multi-part question in this response; "
+            "a trend alone cannot establish intervention impact. Use temporal bounds to resolve "
+            "calendar references and explain any period-boundary interpretation in the reason. "
+            "If the intervention timing remains ambiguous, ask for clarification. "
+            "When timestamp cardinality is below the non-missing row count, choose an explicit "
+            "aggregation in bindings rather than silently collapsing repeated timestamps."
         )
         user_message = (
             "Business question:\n"
@@ -742,17 +893,20 @@ class MetaModelPlanner:
                 allow_nan=False,
             )
         )
+        if planning_note:
+            user_message += "\n\n" + planning_note
 
         try:
             response = self._client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "developer", "content": developer_message},
+                    {"role": self.instruction_role, "content": developer_message},
                     {"role": "user", "content": user_message},
                 ],
                 tools=tools,
                 tool_choice="auto",
                 parallel_tool_calls=self.parallel_tool_calls,
+                **({"temperature": self.temperature} if self.temperature is not None else {}),
             )
         except Exception as exc:
             raise MetaModelError(
@@ -771,9 +925,10 @@ class MetaModelPlanner:
         finish_reason = str(getattr(choice, "finish_reason", "") or "")
         assistant_content = str(getattr(message, "content", "") or "")
         tool_calls = getattr(message, "tool_calls", None) or []
-        if len(tool_calls) > self.max_initial_calls:
+        limit = self.max_initial_calls if call_budget is None else call_budget
+        if len(tool_calls) > limit:
             raise MetaModelError(
-                f"Planner returned {len(tool_calls)} initial calls; maximum is {self.max_initial_calls}."
+                f"Planner returned {len(tool_calls)} initial calls; maximum is {limit}."
             )
 
         traces: list[ToolCallTrace] = []
@@ -850,7 +1005,7 @@ class MetaModelPlanner:
             )
             bindings = _validate_bindings(arguments.get("bindings", {}))
             _validate_semantic_tool_contract(
-                tool_name, clean_parameters, bindings, call_id
+                tool_name, clean_parameters, bindings, call_id, dataset_context=safe_context
             )
 
             source_ids = arguments.get("source_call_ids", [])

@@ -15,7 +15,7 @@ class GroqModelPlanner:
 
     provider = "groq"
     default_base_url = "https://api.groq.com/openai/v1"
-    default_model = "openai/gpt-oss-20b"
+    default_model = "qwen/qwen3.8-27b"
 
     def __init__(
         self,
@@ -24,7 +24,8 @@ class GroqModelPlanner:
         api_key: str | None = None,
         base_url: str = default_base_url,
         model: str = default_model,
-        parallel_tool_calls: bool = False,
+        parallel_tool_calls: bool = True,
+        max_planning_turns: int = 4,
     ) -> None:
         if not isinstance(base_url, str) or not base_url.strip():
             raise GroqModelError("'base_url' must be a non-empty string.")
@@ -47,6 +48,9 @@ class GroqModelPlanner:
             base_url=self.base_url,
             model=self.model,
             parallel_tool_calls=self.parallel_tool_calls,
+            instruction_role="system",
+            max_planning_turns=max_planning_turns,
+            temperature=0.0,
         )
 
     def plan(
@@ -68,6 +72,9 @@ class GroqModelPlanner:
             "base_url": self.base_url,
             "model": self.model,
             "parallel_tool_calls": self.parallel_tool_calls,
+            "instruction_role": "system",
+            "max_planning_turns": self._planner.max_planning_turns,
+            "temperature": self._planner.temperature,
             "fallback_only": True,
             "primary_provider": "meta_model_api",
         }

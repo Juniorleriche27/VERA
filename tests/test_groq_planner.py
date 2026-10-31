@@ -24,8 +24,8 @@ def test_defaults_are_explicit_and_identify_groq():
 
     assert planner.provider == "groq"
     assert planner.base_url == "https://api.groq.com/openai/v1"
-    assert planner.model == "openai/gpt-oss-20b"
-    assert planner.parallel_tool_calls is False
+    assert planner.model == "qwen/qwen3.8-27b"
+    assert planner.parallel_tool_calls is True
 
 
 def test_metadata_marks_groq_as_fallback_not_primary():
@@ -48,7 +48,7 @@ def test_environment_key_allows_construction(monkeypatch):
 
     planner = GroqModelPlanner()
 
-    assert planner.model == "openai/gpt-oss-20b"
+    assert planner.model == "qwen/qwen3.8-27b"
 
 
 def test_blank_model_is_rejected():

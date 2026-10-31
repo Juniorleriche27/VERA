@@ -1,5 +1,8 @@
 # Independent final technical audit
 
+Historical audit at `93b0678`. The subsequent live Groq investigation and current
+planner configuration are documented in [GROQ_LIVE_DIAGNOSTIC.md](GROQ_LIVE_DIAGNOSTIC.md).
+
 Starting point: main, `473e57f46f6e0245e5620c3d06e5694d06ac20f2`, clean.
 Baseline: 380 Python tests pass; official demo: four verified calls, four charts.
 

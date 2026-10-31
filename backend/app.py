@@ -46,6 +46,9 @@ def _safe_dataset_profile(frame: pd.DataFrame) -> dict[str, Any]:
                 "unique_count": int(series.nunique(dropna=True)),
             }
         )
+        if role == "time" and series.notna().any():
+            columns[-1]["min_timestamp"] = series.min().isoformat()
+            columns[-1]["max_timestamp"] = series.max().isoformat()
 
     return {
         "row_count": row_count,
