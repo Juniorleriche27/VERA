@@ -111,9 +111,22 @@ class SelfCorrectionPlanner:
 
     _ROBUSTNESS_FALLBACKS = {
         "pearson_correlation": "spearman_correlation",
-        "linear_regression": "newey_west_regression",
         "one_way_anova": "kruskal_wallis_test",
     }
+
+    def fallback_for(self, tool: str) -> str | None:
+        """Return a registered deterministic fallback, without raising."""
+        return self._ROBUSTNESS_FALLBACKS.get(tool)
+
+    def can_automatically_replan(self, trace: ToolCallTrace) -> bool:
+        return (
+            trace.status is TraceStatus.COMPLETED
+            and trace.verification_status in {
+                VerificationStatus.REJECTED, VerificationStatus.NEEDS_MORE_ANALYSIS
+            }
+            and trace.next_decision == "run_robustness_check"
+            and self.fallback_for(trace.tool) is not None
+        )
 
     def propose(
         self,

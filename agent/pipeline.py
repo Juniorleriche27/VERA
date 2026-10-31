@@ -8,7 +8,7 @@ from typing import Any, Mapping, Protocol, Sequence
 
 from agent.analytics_executor import AnalyticsToolExecutor
 from agent.data_binding import DatasetBinder
-from agent.replanning import SelfCorrectionPlanner
+from agent.replanning import ReplanningError, SelfCorrectionPlanner
 from agent.tool_call_trace import ToolCallTrace, TraceStatus, VerificationStatus
 from verification.verifier import DeterministicVerifier
 
@@ -29,10 +29,33 @@ class PlanningProvider(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class ReplanningOutcome:
+    status: str
+    source_call_id: str
+    decision: str
+    reason: str
+    source_trace_hash: str = ""
+    fallback_tool: str = ""
+    next_call_id: str = ""
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "status": self.status,
+            "source_call_id": self.source_call_id,
+            "decision": self.decision,
+            "reason": self.reason,
+            "source_trace_hash": self.source_trace_hash,
+            "fallback_tool": self.fallback_tool,
+            "next_call_id": self.next_call_id,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class PipelineStep:
     index: int
     trace: ToolCallTrace
     report: Any | None = None
+    replanning: ReplanningOutcome | None = None
 
     @property
     def status(self) -> str:
@@ -47,6 +70,7 @@ class PipelineStep:
             "index": self.index,
             "trace": self.trace.as_dict(),
             "report": report_payload,
+            "replanning": self.replanning.as_dict() if self.replanning else None,
         }
 
 
@@ -62,14 +86,42 @@ class PipelineResult:
         return tuple(step.trace for step in self.steps)
 
     @property
+    def unresolved_call_ids(self) -> tuple[str, ...]:
+        """Non-verified evidence not resolved by a later verified descendant."""
+        ancestors = {step.trace.call_id: step.trace.source_call_ids for step in self.steps}
+        verified_sources: set[str] = set()
+        for step in self.steps:
+            trace = step.trace
+            if trace.status is TraceStatus.COMPLETED and trace.verification_status is VerificationStatus.VERIFIED:
+                pending = list(trace.source_call_ids)
+                while pending:
+                    source = pending.pop()
+                    if source in verified_sources:
+                        continue
+                    verified_sources.add(source)
+                    pending.extend(ancestors.get(source, ()))
+        return tuple(
+            step.trace.call_id for step in self.steps
+            if step.trace.verification_status in {
+                VerificationStatus.REJECTED, VerificationStatus.NEEDS_MORE_ANALYSIS,
+            } and step.trace.call_id not in verified_sources
+        )
+
+    @property
     def succeeded(self) -> bool:
-        if not self.steps:
+        if not self.steps or self.exhausted or self.unresolved_call_ids:
             return False
-        final = self.steps[-1].trace
-        return (
-            final.status is TraceStatus.COMPLETED
-            and final.verification_status is VerificationStatus.VERIFIED
-            and all(step.trace.status is TraceStatus.COMPLETED for step in self.steps)
+        if any(step.trace.status is not TraceStatus.COMPLETED for step in self.steps):
+            return False
+        if not any(step.trace.verification_status is VerificationStatus.VERIFIED for step in self.steps):
+            return False
+        # Every terminal branch must end in verified evidence.
+        parent_ids = {
+            source for step in self.steps for source in step.trace.source_call_ids
+        }
+        return all(
+            step.trace.verification_status is VerificationStatus.VERIFIED
+            for step in self.steps if step.trace.call_id not in parent_ids
         )
 
     @property
@@ -82,6 +134,7 @@ class PipelineResult:
             "steps": [step.as_dict() for step in self.steps],
             "exhausted": self.exhausted,
             "succeeded": self.succeeded,
+            "unresolved_call_ids": list(self.unresolved_call_ids),
         }
 
     def build_decision_brief(self) -> Any:
@@ -184,30 +237,72 @@ class VerifiedAnalyticsPipeline:
                 continue
 
             verified_trace, report = self.verifier.verify(completed)
-            steps.append(PipelineStep(len(steps) + 1, verified_trace, report))
-
+            outcome: ReplanningOutcome | None = None
             if verified_trace.verification_status in {
                 VerificationStatus.NEEDS_MORE_ANALYSIS,
                 VerificationStatus.REJECTED,
             }:
-                if len(steps) >= self.max_steps:
-                    break
-
-                directive = self.replanner.automatic_robustness_check(
-                    verified_trace,
-                    next_call_id=f"{verified_trace.call_id}-replan-{next_replan_number}",
+                decision = verified_trace.next_decision
+                fallback = (
+                    self.replanner.fallback_for(verified_trace.tool)
+                    if decision == "run_robustness_check" else None
                 )
-                next_replan_number += 1
-                replanned_trace = directive.to_trace()
-                if not isinstance(replanned_trace, ToolCallTrace):
-                    raise PipelineError("Replanner returned an invalid trace.")
-                queue.insert(0, replanned_trace)
+                if decision == "run_robustness_check" and fallback:
+                    available = {item["name"] for item in self.analytics.available_tools()}
+                    if fallback not in available:
+                        outcome = ReplanningOutcome(
+                            "no_fallback", verified_trace.call_id, decision,
+                            f"Fallback {fallback!r} is not in the analytics catalog.",
+                            verified_trace.trace_hash,
+                        )
+                    elif len(steps) + 1 >= self.max_steps:
+                        outcome = ReplanningOutcome(
+                            "max_steps_reached", verified_trace.call_id, decision,
+                            "Cannot schedule another tool call within max_steps.",
+                            verified_trace.trace_hash, fallback,
+                        )
+                    else:
+                        next_id = f"{verified_trace.call_id}-replan-{next_replan_number}"
+                        try:
+                            directive = self.replanner.automatic_robustness_check(
+                                verified_trace, next_call_id=next_id,
+                            )
+                            replanned_trace = directive.to_trace()
+                            if not isinstance(replanned_trace, ToolCallTrace):
+                                raise ReplanningError("Replanner returned an invalid trace.")
+                            if replanned_trace.tool != fallback:
+                                raise ReplanningError("Replanner produced an unexpected fallback tool.")
+                        except (ReplanningError, ValueError) as exc:
+                            outcome = ReplanningOutcome(
+                                "no_fallback", verified_trace.call_id, decision,
+                                str(exc), verified_trace.trace_hash,
+                            )
+                        else:
+                            queue.insert(0, replanned_trace)
+                            next_replan_number += 1
+                            outcome = ReplanningOutcome(
+                                "scheduled", verified_trace.call_id, decision,
+                                directive.reason if hasattr(directive, "reason") else "Deterministic robustness fallback scheduled.",
+                                verified_trace.trace_hash, fallback, next_id,
+                            )
+                elif decision == "run_robustness_check":
+                    outcome = ReplanningOutcome(
+                        "no_fallback", verified_trace.call_id, decision,
+                        "No registered safe deterministic fallback.",
+                        verified_trace.trace_hash,
+                    )
+                else:
+                    outcome = ReplanningOutcome(
+                        "unsupported_decision", verified_trace.call_id, decision,
+                        "Decision recorded; no automatic execution is defined.",
+                        verified_trace.trace_hash,
+                    )
+            steps.append(PipelineStep(len(steps) + 1, verified_trace, report, outcome))
 
-        exhausted = bool(queue) or bool(
-            steps
-            and len(steps) >= self.max_steps
-            and steps[-1].trace.verification_status
-            in {VerificationStatus.NEEDS_MORE_ANALYSIS, VerificationStatus.REJECTED}
+        exhausted = bool(queue) or any(
+            step.replanning is not None
+            and step.replanning.status == "max_steps_reached"
+            for step in steps
         )
         return PipelineResult(
             question=question.strip(),

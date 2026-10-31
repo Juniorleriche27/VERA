@@ -64,7 +64,7 @@ class FakeAnalytics:
         self.fail = fail
 
     def available_tools(self):
-        return [{"name": "one_way_anova"}]
+        return [{"name": "one_way_anova"}, {"name": "kruskal_wallis_test"}]
 
     def execute(self, name, *, parameters, bindings):
         self.calls.append((name, parameters, bindings))
@@ -117,12 +117,15 @@ class FakeReplanner:
     def __init__(self):
         self.calls = []
 
+    def fallback_for(self, tool):
+        return "kruskal_wallis_test" if tool in {"one_way_anova", "kruskal_wallis_test"} else None
+
     def automatic_robustness_check(self, trace, *, next_call_id):
         self.calls.append((trace, next_call_id))
         return FakeDirective(
             ToolCallTrace.planned(
                 call_id=next_call_id,
-                tool="one_way_anova",
+                tool="kruskal_wallis_test",
                 objective="Robustness check",
                 reason="Verifier requested more analysis",
                 parameters={"alpha": 0.05},
