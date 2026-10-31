@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from agent.groq_planner import GroqModelPlanner
 from agent.pipeline import VerifiedAnalyticsPipeline
 from backend.config import AppSettings, get_settings
+from backend.data_preparation import DatasetPreparationError, prepare_dataset
 
 
 class AnalysisRequest(BaseModel):
@@ -123,6 +124,15 @@ def create_app(
                 detail="Dataset must contain at least one row and one column.",
             )
 
+        try:
+            prepared = prepare_dataset(frame)
+        except DatasetPreparationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
+        frame = prepared.frame
         dataset_id = uuid4().hex
         profile = _safe_dataset_profile(frame)
         app.state.datasets[dataset_id] = {
