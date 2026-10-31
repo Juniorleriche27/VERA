@@ -152,7 +152,7 @@ class VerifiedDecisionBriefBuilder:
             if isinstance(limitations, str):
                 limitations = (limitations,)
             if isinstance(limitations, (list, tuple)):
-                caveats.extend(str(l).strip() for l in limitations if isinstance(l, str) and l.strip())
+                caveats.extend(str(lim).strip() for lim in limitations if isinstance(lim, str) and lim.strip())
             if trace.tool == "bayesian_structural_causal_impact":
                 caveats.append(
                     "Causal impact is conditional on model specification and counterfactual assumptions; numerical verification does not independently prove causality."

@@ -3,3 +3,10 @@ __pycache__/
 .pytest_cache/
 *.pyc
 .env
+build/
+dist/
+*.egg-info/
+.eggs/
+frontend/.next/
+frontend/node_modules/
+frontend/out/

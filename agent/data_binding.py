@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
 
 from agent.tool_call_trace import ToolCallTrace
+
+if TYPE_CHECKING:
+    # Local import at runtime avoids agent -> backend.__init__ -> app -> agent cycle.
+    from backend.data_preparation import TimeSeriesView
 
 
 class DataBindingError(ValueError):
@@ -21,7 +25,9 @@ def _required_text(value: Any, field: str) -> str:
 
 def _to_frame(dataset: Any) -> pd.DataFrame:
     if isinstance(dataset, pd.DataFrame):
-        return dataset.copy(deep=False)
+        # Deep copy prevents the binder from mutating the caller's source frame,
+        # which is stored by reference in app.state.datasets.
+        return dataset.copy(deep=True)
     if isinstance(dataset, Mapping):
         try:
             return pd.DataFrame(dict(dataset))
@@ -411,7 +417,12 @@ class DatasetBinder:
         return {"data": {str(requested_a): sample_a, str(requested_b): sample_b}}
 
     @staticmethod
-    def _time_series(frame: pd.DataFrame, semantic: Mapping[str, Any], *, value_column: str | None = None):
+    def _time_series(
+        frame: pd.DataFrame,
+        semantic: Mapping[str, Any],
+        *,
+        value_column: str | None = None,
+    ) -> TimeSeriesView:
         """Resolve explicit semantic references and build one local chronological view."""
         time_name = _column(frame, semantic.get("time_column"), "time_column")
         value_name = _column(

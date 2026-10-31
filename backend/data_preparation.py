@@ -123,9 +123,13 @@ def build_time_series(
         raise DatasetPreparationError("Time series requires at least two distinct periods.")
     times = tuple(pd.Timestamp(t) for t in grouped.index)
     try:
-        inferred = pd.infer_freq(pd.DatetimeIndex(times)) if len(times) >= 3 else None
-        frequency = inferred if isinstance(inferred, str) or inferred is None else inferred.freqstr
-    except (TypeError, ValueError):
+        # Pandas 3.1 warns that a future version will return a BaseOffset instead of
+        # a string from infer_freq. Opt into the new behaviour now so the result is
+        # always a BaseOffset; call .freqstr for a normalised string representation.
+        with pd.option_context("future.infer_freq_returns_offset", True):
+            _raw_freq = pd.infer_freq(pd.DatetimeIndex(times)) if len(times) >= 3 else None
+        frequency = _raw_freq.freqstr if _raw_freq is not None else None
+    except (TypeError, ValueError, AttributeError):
         frequency = None
     # Regularity is only asserted when a supported frequency is inferable.
     # If frequency cannot be inferred, gaps cannot be established safely.
