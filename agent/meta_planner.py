@@ -142,6 +142,182 @@ def _binding_guidance(name: str) -> str:
     return ""
 
 
+_TOOL_SPECIFIC_SCHEMAS: dict[str, dict[str, Any]] = {
+    "linear_trend": {
+        "bindings_properties": {
+            "time_column": {
+                "type": "string",
+                "description": "Chronological date or timestamp column name.",
+            },
+            "value_column": {
+                "type": "string",
+                "description": "Continuous numeric measure column name (e.g. 'sales').",
+            },
+            "aggregation": {
+                "type": "string",
+                "enum": ["sum", "mean"],
+                "description": "Aggregation method for repeated timestamps ('sum' or 'mean').",
+            },
+        },
+        "parameters_properties": {
+            "min_periods": {
+                "type": "integer",
+                "description": "Minimum required periods (default 3).",
+            },
+        },
+    },
+    "mean_shift_change_point": {
+        "bindings_properties": {
+            "time_column": {
+                "type": "string",
+                "description": "Chronological date or timestamp column name.",
+            },
+            "value_column": {
+                "type": "string",
+                "description": "Continuous numeric measure column name.",
+            },
+            "aggregation": {
+                "type": "string",
+                "enum": ["sum", "mean"],
+                "description": "Aggregation method for repeated timestamps ('sum' or 'mean').",
+            },
+        },
+        "parameters_properties": {
+            "min_segment_size": {
+                "type": "integer",
+                "description": "Minimum observations in each segment before/after change point (e.g. 10).",
+            },
+            "threshold": {
+                "type": "number",
+                "description": "Change detection sensitivity threshold.",
+            },
+        },
+    },
+    "variance_shift_change_point": {
+        "bindings_properties": {
+            "time_column": {
+                "type": "string",
+                "description": "Chronological date or timestamp column name.",
+            },
+            "value_column": {
+                "type": "string",
+                "description": "Continuous numeric measure column name.",
+            },
+            "aggregation": {
+                "type": "string",
+                "enum": ["sum", "mean"],
+                "description": "Aggregation method ('sum' or 'mean').",
+            },
+        },
+        "parameters_properties": {
+            "min_segment_size": {
+                "type": "integer",
+                "description": "Minimum observations per segment.",
+            },
+        },
+    },
+    "one_way_anova": {
+        "bindings_properties": {
+            "grouping_column": {
+                "type": "string",
+                "description": "Categorical column defining independent groups (e.g. 'region').",
+            },
+            "value_column": {
+                "type": "string",
+                "description": "Continuous numeric measure to compare across groups (e.g. 'sales').",
+            },
+        },
+        "parameters_properties": {
+            "alpha": {
+                "type": "number",
+                "description": "Significance level decision threshold (default 0.05).",
+            },
+        },
+    },
+    "kruskal_wallis_test": {
+        "bindings_properties": {
+            "grouping_column": {
+                "type": "string",
+                "description": "Categorical column defining independent groups.",
+            },
+            "value_column": {
+                "type": "string",
+                "description": "Continuous numeric measure to compare ranks across groups.",
+            },
+        },
+        "parameters_properties": {
+            "alpha": {
+                "type": "number",
+                "description": "Significance level decision threshold (default 0.05).",
+            },
+        },
+    },
+    "mann_whitney_u_test": {
+        "bindings_properties": {
+            "grouping_column": {
+                "type": "string",
+                "description": "Categorical column containing the groups to compare.",
+            },
+            "value_column": {
+                "type": "string",
+                "description": "Continuous numeric measure to compare.",
+            },
+            "group_a": {
+                "type": "string",
+                "description": "First group name (optional if exactly 2 groups).",
+            },
+            "group_b": {
+                "type": "string",
+                "description": "Second group name (optional if exactly 2 groups).",
+            },
+        },
+        "parameters_properties": {
+            "alternative": {
+                "type": "string",
+                "enum": ["two-sided", "greater", "less"],
+                "description": "Alternative hypothesis direction.",
+            },
+        },
+    },
+    "bayesian_structural_causal_impact": {
+        "bindings_properties": {
+            "time_column": {
+                "type": "string",
+                "description": "Chronological date or timestamp column name.",
+            },
+            "value_column": {
+                "type": "string",
+                "description": "Outcome measure column name (e.g. 'sales').",
+            },
+            "intervention_date": {
+                "type": "string",
+                "description": "Exact ISO date where intervention begins (e.g. '2026-09-01').",
+            },
+            "control_columns": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Control column names sharing identical timestamps.",
+            },
+            "aggregation": {
+                "type": "string",
+                "enum": ["sum", "mean"],
+                "description": "Temporal aggregation method ('sum' or 'mean').",
+            },
+        },
+        "parameters_properties": {
+            "credibility": {
+                "type": "number",
+                "description": "Credible interval probability (default 0.95).",
+            },
+            "prior_scale": {
+                "type": "number",
+                "description": "Prior standard deviation scale (default 10.0).",
+            },
+        },
+    },
+}
+
+
 def build_meta_tools(
     catalog: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -160,6 +336,11 @@ def build_meta_tools(
             "never raw dataset rows or raw value arrays.",
             _binding_guidance(item["name"]),
         ]
+
+        spec = _TOOL_SPECIFIC_SCHEMAS.get(item["name"])
+        bindings_props: dict[str, Any] = dict(spec["bindings_properties"]) if spec else {}
+        params_props: dict[str, Any] = dict(spec["parameters_properties"]) if spec else {}
+
         tools.append(
             {
                 "type": "function",
@@ -187,6 +368,7 @@ def build_meta_tools(
                                     "Method configuration only, such as alpha, lag, "
                                     "threshold, alternative, or horizon."
                                 ),
+                                "properties": params_props,
                                 "additionalProperties": True,
                             },
                             "bindings": {
@@ -195,6 +377,7 @@ def build_meta_tools(
                                     "Logical references to dataset columns or prior "
                                     "evidence. Do not include raw observations."
                                 ),
+                                "properties": bindings_props,
                                 "additionalProperties": {
                                     "oneOf": [
                                         {"type": "string"},
@@ -227,6 +410,49 @@ def build_meta_tools(
         )
 
     return tools
+
+
+def _validate_semantic_tool_contract(
+    tool: str,
+    parameters: Mapping[str, Any],
+    bindings: Mapping[str, Any],
+    call_id: str,
+) -> None:
+    for key in parameters:
+        if str(key).strip().lower() in _FORBIDDEN_CONTEXT_KEYS:
+            raise MetaModelError(
+                f"Tool call {call_id!r} 'parameters' contains forbidden raw data key: {key!r}."
+            )
+    for key in bindings:
+        if str(key).strip().lower() in _FORBIDDEN_CONTEXT_KEYS:
+            raise MetaModelError(
+                f"Tool call {call_id!r} 'bindings' contains forbidden raw data key: {key!r}."
+            )
+
+    agg = bindings.get("aggregation") or parameters.get("aggregation")
+    if agg is not None and agg not in ("sum", "mean"):
+        raise MetaModelError(
+            f"Tool call {call_id!r} specifies invalid aggregation {agg!r}; must be 'sum' or 'mean'."
+        )
+
+    for param_name in ("alpha", "credibility"):
+        if param_name in parameters:
+            val = parameters[param_name]
+            if isinstance(val, bool) or not isinstance(val, (int, float)) or val <= 0.0 or val >= 1.0:
+                raise MetaModelError(
+                    f"Tool call {call_id!r} parameter {param_name!r} must be a number strictly between 0 and 1."
+                )
+
+    if tool == "bayesian_structural_causal_impact":
+        if "intervention_date" not in bindings and "intervention_date" not in parameters:
+            raise MetaModelError(
+                f"Tool call {call_id!r} for 'bayesian_structural_causal_impact' requires an 'intervention_date' binding."
+            )
+        date_val = bindings.get("intervention_date") or parameters.get("intervention_date")
+        if not isinstance(date_val, str) or not date_val.strip():
+            raise MetaModelError(
+                f"Tool call {call_id!r} 'intervention_date' must be a non-empty string."
+            )
 
 
 def _validate_bindings(bindings: Any) -> dict[str, Any]:
@@ -344,22 +570,20 @@ class MetaModelPlanner:
             "metadata and safe aggregates, not raw rows. Never request or invent "
             "raw dataset values. Put only column names or semantic references in "
             "bindings. Put method settings in parameters. Explain each tool call "
-            "with a concrete objective and reason. Decompose multi-part business "
-            "questions into complementary analytical evidence (trend, timing of "
-            "change, group comparison, and intervention when relevant). Diagnosis "
-            "of why sales declined is not the same as causal effect of a campaign. "
-            "Choose only tools necessary to cover the question; avoid redundant "
-            "tests. Prefer descriptive diagnostic, change localization, group "
-            "comparison, then intervention when the dataset supports these. "
-            "Request at most four independent initial tool calls to leave a fifth "
-            "execution slot for deterministic robustness replanning. Independent "
-            "calls should have empty source_call_ids: declare dependencies only "
-            "for genuine prior evidence, not artificial ordering (the runtime "
-            "cannot generally inject previous results into later tool inputs). "
-            "For additive sales or revenue sum may be appropriate, but never "
-            "guess aggregation for other measures. Never invent analytical results "
-            "or dates; local deterministic tools calculate actual values. "
-            "If no analysis is needed, answer briefly instead of inventing a call."
+            "with a concrete objective and reason.\n\n"
+            "Query Scope Guidelines:\n"
+            "- Multi-part diagnostic queries (e.g. asking why a metric declined, "
+            "when it started, whether regions differ, and if an intervention helped): "
+            "Decompose into complementary analytical evidence (trend, change point, "
+            "group comparison, and causal impact). Choose at most four independent initial calls.\n"
+            "- Targeted single-aspect queries (e.g. only asking whether regions differ, "
+            "or only asking what the trend is): Call ONLY the 1 or 2 tools directly "
+            "answering that aspect (e.g. one_way_anova for group differences). Do NOT "
+            "call unrelated temporal, change-point, or causal tools.\n"
+            "- Never guess or invent dates, columns, or values. Independent calls should "
+            "have empty source_call_ids. For additive measures (sales, revenue) sum is "
+            "appropriate; sum/mean must be deliberate. If no analysis is needed, "
+            "answer briefly instead of inventing a tool call."
         )
         user_message = (
             "Business question:\n"
@@ -477,6 +701,9 @@ class MetaModelPlanner:
                 "parameters",
             )
             bindings = _validate_bindings(arguments.get("bindings", {}))
+            _validate_semantic_tool_contract(
+                tool_name, clean_parameters, bindings, call_id
+            )
 
             source_ids = arguments.get("source_call_ids", [])
             if not isinstance(source_ids, list) or not all(

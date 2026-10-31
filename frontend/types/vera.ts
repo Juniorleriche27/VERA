@@ -62,6 +62,7 @@ export interface ToolCallTrace {
   trace_hash: string;
   deterministic_result: Record<string, JsonValue> | null;
   next_decision: string;
+  execution_error?: string;
 }
 
 export interface AnalysisStep {

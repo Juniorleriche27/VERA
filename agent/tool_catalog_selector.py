@@ -178,14 +178,14 @@ class ToolCatalogSelector:
             return any(re.search(r"(?<!\w)" + re.escape(p) + r"(?!\w)", q) for p in phrases)
 
         decline = contains("decline", "declining", "decrease", "decreased", "drop", "dropped", "fall", "falling", "baisse", "diminue", "diminué")
-        temporal = decline or contains("time", "over time", "trend", "date", "month", "week", "year", "growth", "trajectory", "evolution", "évolution", "tendance")
-        change = contains("when", "when did", "began", "start", "started", "start of decline", "change point", "changepoint", "shift", "break", "breakpoint", "structural change", "regime change", "sudden drop", "quand")
+        temporal = decline or contains("time", "over time", "trend", "date", "month", "week", "year", "growth", "trajectory", "evolution", "évolution", "tendance", "evolving")
+        change = contains("when", "when did", "began", "start", "started", "start of decline", "change point", "changepoint", "shift", "break", "breakpoint", "structural change", "structural shift", "regime change", "sudden drop", "quand")
         # Asking why a measured quantity declined also calls for determining
         # when the decline began, but ordinary decline alone is not a break claim.
         change = change or (decline and contains("why", "explain", "cause", "what changed", "pourquoi"))
-        groups = contains("region", "regions", "région", "régions", "segment", "segments", "product", "products", "channel", "channels", "group", "groups", "across", "compare", "difference", "contribution")
+        groups = contains("region", "regions", "région", "régions", "segment", "segments", "product", "products", "channel", "channels", "group", "groups", "across", "compare", "difference", "different", "differently", "differs", "contribution")
         groups = groups or (decline and "dimension" in roles and contains("why", "explain", "cause", "pourquoi"))
-        causal = contains("campaign", "promotion", "intervention", "treatment", "impact", "effect", "effective", "causal", "campagne")
+        causal = contains("campaign", "promotion", "intervention", "treatment", "impact", "effect", "effective", "causal", "campagne", "improve", "improved", "improvement")
         return {name for name, active in (("temporal", temporal), ("change", change), ("groups", groups), ("causal", causal)) if active}
 
     @staticmethod
