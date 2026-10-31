@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Check, Database, GitBranch, LockKeyhole, ShieldCheck } from "lucide-react";
 import { Header } from "@/components/header";
 import { DatasetUpload } from "@/components/dataset-upload";
@@ -19,6 +19,8 @@ export function AppShell() {
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const scrollOnResult = useRef(false);
 
   const checkHealth = useCallback(async () => {
     setApiState("checking");
@@ -36,6 +38,13 @@ export function AppShell() {
     });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!analysis || !scrollOnResult.current) return;
+    scrollOnResult.current = false;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    resultsRef.current?.scrollIntoView({ behavior: reducedMotion ? "instant" : "smooth", block: "start" });
+  }, [analysis]);
 
   async function upload(file: File) {
     setDataset(null); setAnalysis(null); setAnalysisError(null); setUploadError(null);
@@ -59,6 +68,7 @@ export function AppShell() {
     try {
       const result = await veraApi.runAnalysis(dataset.dataset_id, question.trim());
       if (!result.analysis_id || !Array.isArray(result.steps) || !Array.isArray(result.visualizations) || typeof result.succeeded !== "boolean") throw new Error("The API returned an incomplete analysis response.");
+      scrollOnResult.current = true;
       setAnalysis(result);
     } catch (error) { setAnalysisError(readableError(error)); }
     finally { setAnalysisBusy(false); }
@@ -78,8 +88,9 @@ export function AppShell() {
       <div className="mb-7 mt-9 flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow mb-1.5">YOUR INVESTIGATION</p><h2 className="text-[22px] font-bold tracking-[-.055em]">From data to decision.</h2></div><div className="flex items-center gap-2 rounded-full border border-[#dbe5dd] bg-white px-4 py-2 text-[11px] font-semibold text-[#5e7967]"><Check size={13} className="text-[#267f58]"/> Built on verified evidence</div></div>
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,.92fr)_minmax(0,1.08fr)] lg:gap-6">
         <div className="min-w-0"><DatasetUpload dataset={dataset} busy={uploadBusy || analysisBusy} error={uploadError} onUpload={upload}/>{dataset && <DatasetProfile dataset={dataset}/>}</div>
-        <div className="min-w-0"><QuestionComposer question={question} setQuestion={setQuestion} ready={Boolean(dataset) && !uploadBusy} busy={analysisBusy} onRun={() => void runAnalysis()}/><AnalysisWorkspace analysis={analysis} busy={analysisBusy} error={analysisError}/></div>
+        <div className="min-w-0"><QuestionComposer question={question} setQuestion={setQuestion} ready={Boolean(dataset) && !uploadBusy} busy={analysisBusy} onRun={() => void runAnalysis()}/></div>
       </div>
+      <div ref={resultsRef} className="scroll-mt-8"><AnalysisWorkspace analysis={analysis} busy={analysisBusy} error={analysisError}/></div>
       <div className="mt-14 flex flex-wrap items-center justify-between gap-4 border-t border-[#dce5dc] pt-6"><div className="flex items-center gap-2 text-[11px] text-[#819188]"><LockKeyhole size={14} className="text-[#388366]"/><span>Raw rows stay on the analytics backend. The planner sees safe metadata only.</span></div><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.1em] text-[#95a29a]">VERA / VERIFIABLE ANALYTICS <ArrowUpRight size={13}/></div></div>
     </main>
   </div>;

@@ -25,7 +25,8 @@ Visit `http://localhost:3000`. The frontend uses `NEXT_PUBLIC_VERA_API_URL=http:
 1. API health is checked once at startup; retry is available when unavailable.
 2. Upload a **CSV** by drag-and-drop or file selection. The API returns the safe schema/profile. Data rows stay on the analytics backend, while the planning model receives safe metadata only.
 3. Use the official business question suggestion or write your own question. Press **Ctrl/Cmd + Enter** or the primary action to submit.
-4. `POST /analyses` is synchronous. The UI displays an honest in-flight state and retains the complete response once received, including steps, verification reports, decision brief, visualizations and evidence. The initial screen displays only a truthful result summary; chart rendering and detailed evidence inspection are for the next frontend milestone.
+4. `POST /analyses` is synchronous. The UI displays an honest in-flight state and retains the complete response once received, including steps, verification reports, decision brief, visualizations and evidence.
+5. After completion, the full-width results workspace presents the question from the API, an executed-steps timeline (including replan outcomes), the exact deterministic Decision Brief, Recharts line/bar visualizations and an expandable Evidence & provenance inspector with original results, full hashes and verification checks. The causal counterfactual interval is rendered as a shaded range band using the backend-provided lower and upper bounds; the frontend does not recalculate any statistical estimate. An investigation without a final verified brief remains clearly marked as needing review.
 
 ## Official demo CSV
 
