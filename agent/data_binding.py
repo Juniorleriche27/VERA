@@ -161,6 +161,12 @@ def _resolve_grouped_columns(
     )
     refs = _semantic_column_refs(frame, semantic)
 
+    for candidate in (group_candidate, value_candidate):
+        if candidate is not None and _resolve_frame_column_reference(frame, candidate) is None:
+            raise DataBindingError(
+                f"Could not deterministically resolve grouped analysis columns: unknown dataset column {candidate!r}."
+            )
+
     group_candidate = _resolve_frame_column_reference(frame, group_candidate)
     value_candidate = _resolve_frame_column_reference(frame, value_candidate)
 
@@ -395,7 +401,12 @@ class DatasetBinder:
                     "Mann-Whitney binding needs 'group_a' and 'group_b' when "
                     "the grouping column does not contain exactly two groups."
                 )
-            requested_a, requested_b = observed
+            if requested_a is None and requested_b is None:
+                requested_a, requested_b = observed
+            elif requested_a is None:
+                requested_a = next((group for group in observed if group != requested_b), None)
+            else:
+                requested_b = next((group for group in observed if group != requested_a), None)
 
         if requested_a == requested_b:
             raise DataBindingError("'group_a' and 'group_b' must be different.")

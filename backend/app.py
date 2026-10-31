@@ -10,8 +10,9 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from agent.groq_planner import GroqModelPlanner
-from agent.pipeline import VerifiedAnalyticsPipeline
+from agent.groq_planner import GroqModelError, GroqModelPlanner
+from agent.meta_planner import MetaModelError
+from agent.pipeline import PipelineError, VerifiedAnalyticsPipeline
 from backend.config import AppSettings, get_settings
 from backend.data_preparation import DatasetPreparationError, prepare_dataset
 
@@ -97,7 +98,7 @@ def create_app(
                 detail="Only CSV datasets are supported in VERA API v1.",
             )
 
-        raw = await file.read()
+        raw = await file.read(config.max_upload_bytes + 1)
         if len(raw) > config.max_upload_bytes:
             raise HTTPException(
                 status_code=413,
@@ -117,7 +118,7 @@ def create_app(
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Could not parse CSV dataset: {exc}",
+                detail="Could not parse CSV dataset. Check its encoding and CSV structure.",
             ) from exc
 
         if frame.empty or len(frame.columns) == 0:
@@ -165,13 +166,18 @@ def create_app(
                 detail="Question must not be blank.",
             )
 
-        planner = app.state.planner_factory()
-        pipeline = VerifiedAnalyticsPipeline(planner)
-        result = pipeline.run(
-            question,
-            dataset=dataset["frame"],
-            dataset_context=dataset["profile"],
-        )
+        try:
+            planner = app.state.planner_factory()
+            pipeline = VerifiedAnalyticsPipeline(planner)
+            result = pipeline.run(
+                question,
+                dataset=dataset["frame"],
+                dataset_context=dataset["profile"],
+            )
+        except GroqModelError as exc:
+            raise HTTPException(status_code=503, detail="Planning provider is not configured.") from exc
+        except (MetaModelError, PipelineError) as exc:
+            raise HTTPException(status_code=502, detail="Planning provider could not produce a valid analysis plan. Please retry.") from exc
 
         analysis_id = uuid4().hex
         payload: dict[str, Any] = {
@@ -180,6 +186,7 @@ def create_app(
             "question": question,
             "succeeded": result.succeeded,
             "exhausted": result.exhausted,
+            "unresolved_call_ids": list(result.unresolved_call_ids),
             "steps": [step.as_dict() for step in result.steps],
             "final_status": (
                 result.final_trace.verification_status.value

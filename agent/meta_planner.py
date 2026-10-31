@@ -69,7 +69,50 @@ def _safe_dataset_context(context: Mapping[str, Any]) -> dict[str, Any]:
                 visit(child, f"{path}[{index}]")
 
     visit(cloned, "dataset_context")
-    return cloned
+    # Construct the outbound object from typed metadata, never from arbitrary
+    # caller fields. A blacklist cannot exclude raw rows under an alias.
+    safe: dict[str, Any] = {}
+    allowed = {"dataset_id", "row_count", "column_count", "columns"}
+    if set(cloned) - allowed:
+        raise MetaModelError("Unsupported dataset metadata fields.")
+    for key in ("row_count", "column_count"):
+        if key in cloned:
+            value = cloned[key]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise MetaModelError(f"'{key}' must be a non-negative integer.")
+            safe[key] = value
+    if "dataset_id" in cloned:
+        safe["dataset_id"] = _required_text(cloned["dataset_id"], "dataset_id")
+    if "columns" in cloned:
+        if not isinstance(cloned["columns"], list):
+            raise MetaModelError("'columns' must be a list of metadata.")
+        safe_columns: list[Any] = []
+        text_fields = {"name", "dtype", "role"}
+        count_fields = {"missing_count", "unique_count"}
+        for column in cloned["columns"]:
+            if isinstance(column, str):
+                safe_columns.append(_required_text(column, "column name"))
+                continue
+            if not isinstance(column, dict) or set(column) - (text_fields | count_fields | {"missing_rate"}):
+                raise MetaModelError("Unsupported column metadata fields.")
+            clean: dict[str, Any] = {"name": _required_text(column.get("name"), "column name")}
+            for key in text_fields - {"name"}:
+                if key in column:
+                    clean[key] = _required_text(column[key], key)
+            for key in count_fields:
+                if key in column:
+                    value = column[key]
+                    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                        raise MetaModelError(f"'{key}' must be a non-negative integer.")
+                    clean[key] = value
+            if "missing_rate" in column:
+                value = column["missing_rate"]
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+                    raise MetaModelError("'missing_rate' must lie within [0, 1].")
+                clean["missing_rate"] = value
+            safe_columns.append(clean)
+        safe["columns"] = safe_columns
+    return safe
 
 
 def _normalized_catalog(
@@ -185,10 +228,12 @@ _TOOL_SPECIFIC_SCHEMAS: dict[str, dict[str, Any]] = {
         "parameters_properties": {
             "min_segment_size": {
                 "type": "integer",
+                "minimum": 2,
                 "description": "Minimum observations in each segment before/after change point (integer >= 2, default 2).",
             },
             "threshold": {
                 "type": "number",
+                "exclusiveMinimum": 0,
                 "description": "Change detection standardized mean-shift sensitivity threshold (finite number > 0, default 1.0).",
             },
         },
@@ -213,10 +258,12 @@ _TOOL_SPECIFIC_SCHEMAS: dict[str, dict[str, Any]] = {
         "parameters_properties": {
             "min_segment_size": {
                 "type": "integer",
+                "minimum": 2,
                 "description": "Minimum observations per segment (integer >= 2, default 3).",
             },
             "variance_ratio_threshold": {
                 "type": "number",
+                "exclusiveMinimum": 1,
                 "description": "Variance ratio threshold strictly greater than 1 (finite number > 1.0, default 4.0).",
             },
         },
@@ -306,10 +353,13 @@ _TOOL_SPECIFIC_SCHEMAS: dict[str, dict[str, Any]] = {
         "parameters_properties": {
             "credibility": {
                 "type": "number",
+                "exclusiveMinimum": 0,
+                "exclusiveMaximum": 1,
                 "description": "Credible interval probability strictly between 0 and 1 (default 0.95).",
             },
             "prior_scale": {
                 "type": "number",
+                "exclusiveMinimum": 0,
                 "description": "Prior standard deviation scale, finite positive number (default 10.0).",
             },
         },
@@ -398,8 +448,9 @@ def build_meta_tools(
                             "source_call_ids": {
                                 "type": "array",
                                 "items": {"type": "string"},
+                                "maxItems": 0,
                                 "description": (
-                                    "Earlier VERA call IDs this analysis depends on."
+                                    "Must be empty for initial calls. Deterministic replanning assigns evidence lineage."
                                 ),
                             },
                         },
@@ -495,6 +546,14 @@ def _validate_semantic_tool_contract(
             raise MetaModelError(
                 f"Tool call {call_id!r} for {tool!r} returned unsupported binding keys: {sorted(unknown_bindings)}."
             )
+        for key, value in bindings.items():
+            schema = spec["bindings_properties"][key]
+            if schema["type"] == "string" and (not isinstance(value, str) or not value.strip()):
+                raise MetaModelError(f"Tool call {call_id!r} binding {key!r} must be a non-empty string.")
+            if schema["type"] == "array" and (
+                not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value)
+            ):
+                raise MetaModelError(f"Tool call {call_id!r} binding {key!r} must be a list of column names.")
 
         # Validate parameter bounds:
         if "min_segment_size" in parameters:
@@ -652,7 +711,7 @@ class MetaModelPlanner:
             "You are VERA's analytics planner. Decide which deterministic "
             "analytics tools are needed to answer the user's business question. "
             "Use only the supplied function tools. The dataset context contains "
-            "metadata and safe aggregates, not raw rows. Never request or invent "
+            "schema and profile metadata, not raw rows. Never request or invent "
             "raw dataset values. Put column names, semantic references, and dataset "
             "preparation instructions (such as 'aggregation' and 'intervention_date') in bindings. "
             "Put method configuration settings in parameters. For tools without execution "
@@ -697,7 +756,7 @@ class MetaModelPlanner:
             )
         except Exception as exc:
             raise MetaModelError(
-                f"Meta Model API planning request failed: {exc}"
+                "Model provider planning request failed."
             ) from exc
 
         choices = getattr(response, "choices", None)
@@ -771,6 +830,8 @@ class MetaModelPlanner:
                     f"Tool call {call_id!r} returned unsupported argument keys: "
                     f"{sorted(unknown_keys)}."
                 )
+            if {"objective", "reason", "parameters", "bindings"} - set(arguments):
+                raise MetaModelError(f"Tool call {call_id!r} is missing required planning fields.")
 
             objective = _required_text(
                 arguments.get("objective"),
@@ -801,6 +862,9 @@ class MetaModelPlanner:
                     f"Tool call {call_id!r} 'source_call_ids' must be "
                     "a list of non-empty strings."
                 )
+
+            if source_ids:
+                raise MetaModelError("Initial tool calls must be independent; no prior evidence was supplied.")
 
             traces.append(
                 ToolCallTrace.planned(

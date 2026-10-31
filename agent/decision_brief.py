@@ -375,5 +375,5 @@ class VerifiedDecisionBriefBuilder:
                 if p is not None and p < .05:
                     return "Inspect verified group-level differences and, when the business question requires it, run an appropriate post-hoc comparison before acting on a specific pair of groups."
                 if p is not None:
-                    return "Do not claim a group-mean difference from this test; review power, sample size, and alternative explanations before further action."
+                    return "Do not claim a statistically significant group difference from this test; review power, sample size, and alternative explanations before further action."
         return "Use the verified evidence as the basis for interpretation, and run additional analysis only if the business decision requires stronger or more specific evidence."

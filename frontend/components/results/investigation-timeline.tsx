@@ -109,7 +109,8 @@ export function InvestigationTimeline({ steps }: { steps: AnalysisStep[] }) {
                     </span>
                     <ChevronRight size={12} className="text-[#99aa9f]" />
                     <span className="inline-flex items-center gap-1 font-semibold text-[#486352]">
-                      <CheckCircle2 size={12} className="text-[#2b7854]" /> Deterministically Executed
+                      {step.trace.status === "completed" ? <CheckCircle2 size={12} className="text-[#2b7854]" /> : <Info size={12} />}
+                      {step.trace.status === "completed" ? "Deterministically Executed" : isFailed ? "Execution Failed" : step.trace.status === "running" ? "Execution Running" : "Execution Planned"}
                     </span>
                     <ChevronRight size={12} className="text-[#99aa9f]" />
                     <span
@@ -122,7 +123,7 @@ export function InvestigationTimeline({ steps }: { steps: AnalysisStep[] }) {
                       }`}
                     >
                       <ShieldCheck size={12} />
-                      {step.trace.verification_status.toUpperCase().replaceAll("_", " ")}
+                      {isFailed ? "FAILED" : step.trace.verification_status.toUpperCase().replaceAll("_", " ")}
                     </span>
                   </div>
 

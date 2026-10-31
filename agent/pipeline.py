@@ -8,6 +8,7 @@ from typing import Any, Mapping, Protocol, Sequence
 
 from agent.analytics_executor import AnalyticsToolExecutor
 from agent.data_binding import DatasetBinder
+from agent.meta_planner import _safe_dataset_context
 from agent.replanning import ReplanningError, SelfCorrectionPlanner
 from agent.tool_call_trace import ToolCallTrace, TraceStatus, VerificationStatus
 from verification.verifier import DeterministicVerifier
@@ -191,7 +192,7 @@ class VerifiedAnalyticsPipeline:
         if not isinstance(dataset_context, Mapping):
             raise PipelineError("'dataset_context' must be a mapping.")
 
-        safe_context = dict(dataset_context)
+        safe_context = _safe_dataset_context(dataset_context)
         selection = self.tool_selector.select(
             question.strip(),
             dataset_context=safe_context,
@@ -207,6 +208,11 @@ class VerifiedAnalyticsPipeline:
             raise PipelineError("Planner returned an invalid trace collection.")
         if len(planned_traces) > 4:
             raise PipelineError("Planner returned more than four initial tool calls; refusing to truncate silently.")
+        reserved_ids = {trace.call_id for trace in planned_traces}
+        if len(reserved_ids) != len(planned_traces):
+            raise PipelineError("Planner returned duplicate tool call IDs.")
+        if any(trace.source_call_ids for trace in planned_traces):
+            raise PipelineError("Initial tool calls must be independent; lineage is assigned by replanning.")
 
         queue = list(planned_traces)
         steps: list[PipelineStep] = []
@@ -265,6 +271,9 @@ class VerifiedAnalyticsPipeline:
                         )
                     else:
                         next_id = f"{verified_trace.call_id}-replan-{next_replan_number}"
+                        while next_id in reserved_ids:
+                            next_replan_number += 1
+                            next_id = f"{verified_trace.call_id}-replan-{next_replan_number}"
                         try:
                             directive = self.replanner.automatic_robustness_check(
                                 verified_trace, next_call_id=next_id,
@@ -274,12 +283,15 @@ class VerifiedAnalyticsPipeline:
                                 raise ReplanningError("Replanner returned an invalid trace.")
                             if replanned_trace.tool != fallback:
                                 raise ReplanningError("Replanner produced an unexpected fallback tool.")
+                            if replanned_trace.call_id != next_id or replanned_trace.source_call_ids != (verified_trace.call_id,):
+                                raise ReplanningError("Replanner produced invalid lineage or call ID.")
                         except (ReplanningError, ValueError) as exc:
                             outcome = ReplanningOutcome(
                                 "no_fallback", verified_trace.call_id, decision,
                                 str(exc), verified_trace.trace_hash,
                             )
                         else:
+                            reserved_ids.add(next_id)
                             queue.insert(0, replanned_trace)
                             next_replan_number += 1
                             outcome = ReplanningOutcome(

@@ -76,7 +76,7 @@ export function InvestigationOverview({ analysis }: { analysis: AnalysisResponse
                             : "text-[#976023]"
                         }`}
                       >
-                        • {isVer ? "Verified" : step.trace.verification_status.replaceAll("_", " ")}
+                        • {isFailed ? "Failed" : isVer ? "Verified" : step.trace.verification_status.replaceAll("_", " ")}
                       </span>
                     </span>
                     {idx < analysis.steps.length - 1 && (

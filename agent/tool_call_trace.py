@@ -133,6 +133,14 @@ class ToolCallTrace:
             raise ToolCallTraceError("'parameters' must be a mapping.")
         if not isinstance(bindings, dict):
             raise ToolCallTraceError("'bindings' must be a mapping.")
+        object.__setattr__(self, "_parameters_json", _canonical_json(parameters, "parameters"))
+        object.__setattr__(self, "_bindings_json", _canonical_json(bindings, "bindings"))
+        if self._result_json is not None:
+            try:
+                result = _decode_json(self._result_json)
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise ToolCallTraceError("Result must use valid JSON text.") from exc
+            object.__setattr__(self, "_result_json", _canonical_json(result, "deterministic_result"))
 
         normalized_sources = tuple(
             _required_text(value, "source_call_ids")

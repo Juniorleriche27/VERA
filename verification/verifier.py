@@ -77,11 +77,15 @@ def _iter_probability_fields(result: Mapping[str, Any]):
         normalized = key.lower()
         if normalized == "p_value" or normalized.endswith("_p_value"):
             yield key, value
-        elif normalized in {"p_values", "adjusted_p_values"} and isinstance(
-            value, list
-        ):
-            for index, item in enumerate(value):
-                yield f"{key}[{index}]", item
+        elif normalized in {"p_values", "adjusted_p_values"}:
+            if not isinstance(value, list):
+                yield key, None
+            else:
+                for index, item in enumerate(value):
+                    yield f"{key}[{index}]", item
+        elif isinstance(value, Mapping):
+            for child_key, child_value in _iter_probability_fields(value):
+                yield f"{key}.{child_key}", child_value
 
 
 def _explicit_negative_flag(result: Mapping[str, Any]) -> tuple[str, str] | None:
@@ -147,6 +151,18 @@ def _check_causal_structure(
             "causal_sample_structure", valid, CheckSeverity.CRITICAL,
             "Causal counts must exist, add up and intervention index must equal pre-intervention count.",
         ))
+        if valid:
+            for field in ("observed_post", "counterfactual_post_mean", "counterfactual_post_interval",
+                          "point_effect", "point_effect_interval"):
+                if field in result:
+                    values = result[field]
+                    aligned = isinstance(values, list) and len(values) == int(post)
+                    if aligned and not field.endswith("interval"):
+                        aligned = all(_number(value) is not None for value in values)
+                    checks.append(VerificationCheck(
+                        f"causal_array:{field}", aligned, CheckSeverity.CRITICAL,
+                        "Causal arrays must be finite and match post_intervention_count.",
+                    ))
     return checks
 
 
@@ -240,6 +256,16 @@ class DeterministicVerifier:
         checks.extend(envelope_checks)
         if any(not check.passed and check.severity is CheckSeverity.CRITICAL for check in envelope_checks):
             return self._report(trace, VerificationStatus.REJECTED, "rerun_tool_with_valid_output", checks)
+
+        for field in ("sample_size", "n_observations", "observation_count", "exceedance_count"):
+            if field in payload:
+                count = _number(payload[field])
+                if count is None or count < 0 or not count.is_integer():
+                    checks.append(VerificationCheck(
+                        f"sample_count:{field}", False, CheckSeverity.CRITICAL,
+                        "Reported sample counts must be non-negative integers.",
+                    ))
+                    return self._report(trace, VerificationStatus.REJECTED, "rerun_tool_with_valid_output", checks)
 
         probability_failures = []
         for field, value in _iter_probability_fields(payload):
@@ -416,10 +442,10 @@ class DeterministicVerifier:
         )
         invalid = []
         for lower_key, upper_key in pairs:
-            if lower_key not in result or upper_key not in result:
+            if lower_key not in result and upper_key not in result:
                 continue
-            lower = _number(result[lower_key])
-            upper = _number(result[upper_key])
+            lower = _number(result.get(lower_key))
+            upper = _number(result.get(upper_key))
             if lower is None or upper is None or lower > upper:
                 invalid.append(f"{lower_key}/{upper_key}")
 

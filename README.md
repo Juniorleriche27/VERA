@@ -15,13 +15,13 @@ Business question
       ↓
 Safe dataset metadata (no raw rows)
       ↓
-LLM planner  (GroqModelPlanner / MetaModelPlanner)
-      ↓
 ToolCatalogSelector  (local, deterministic pre-filter)
+      ↓
+LLM planner  (GroqModelPlanner / MetaModelPlanner)
       ↓
 DatasetBinder  (semantic column → local raw values)
       ↓
-Deterministic analytics engine  (95 core + 7 hackathon extensions)
+Deterministic analytics engine  (102 unique tools; VERA extensions take precedence)
       ↓
 ToolCallTrace  (immutable audit record + SHA-256 hash)
       ↓
@@ -45,7 +45,10 @@ FastAPI  →  Next.js frontend
 ## Pre-existing infrastructure
 
 VERA uses the [koryxa data-analysis-engine](https://github.com/Juniorleriche27/data-analysis-engine)
-(95 native analytical capabilities) as its computational foundation.
+as its computational foundation. The original foundation had 95 native
+capabilities; the pinned engine now exposes 97 entries. VERA registers seven
+extensions, overriding the core ANOVA and Mann-Whitney implementations, for
+**102 unique tools** (97 + 7 − 2).
 
 ## New hackathon work
 
@@ -71,7 +74,13 @@ visualization, UI/API work, and the following analytical extensions are new:
 - A Python virtual environment with the packages from `requirements.txt` installed.
 
 ```bash
-# From an environment that already has the data-analysis-engine installed:
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+```
+
+```bash
+# With the virtual environment activated and GROQ_API_KEY exported:
 cd ~/VERA
 PYTHONPATH=. uvicorn backend.app:app --host 0.0.0.0 --port 8000
 ```
@@ -80,7 +89,9 @@ The API will be available at `http://localhost:8000`.
 
 ### Environment variables
 
-Copy `.env.example` to `.env` and fill in the required values:
+`.env.example` lists backend settings. Export these variables in the backend
+process environment before starting uvicorn; this command does not load `.env`
+automatically. Docker's `--env-file .env` loads them explicitly.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -90,6 +101,10 @@ Copy `.env.example` to `.env` and fill in the required values:
 | `VERA_ENV` | `development` | Runtime environment |
 | `VERA_CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed CORS origins |
 | `VERA_MAX_UPLOAD_BYTES` | `26214400` | Maximum CSV upload size (bytes) |
+
+The default API planner remains Groq. `MetaModelPlanner` is available for explicit
+integration and uses `MODEL_API_KEY`; its configured endpoint and model still
+require a live provider check. Switching the API provider is not automatic.
 
 ---
 
@@ -106,7 +121,7 @@ The UI will be available at `http://localhost:3000`.
 ### Frontend environment
 
 Copy `frontend/.env.example` to `frontend/.env.local` and set `NEXT_PUBLIC_VERA_API_URL`
-to the backend URL (default: `http://localhost:8000`).
+to the backend URL (default: `http://127.0.0.1:8000`).
 
 ---
 
@@ -116,10 +131,11 @@ to the backend URL (default: `http://localhost:8000`).
 
 ```bash
 cd ~/VERA
-PYTHONPATH=. python -m pytest -q
+PYTHONPATH=. python -m pytest -q -p no:asyncio
 ```
 
-Expected: **380 passed**.
+The original baseline was **380 passed**; final audit regressions are included
+in the current suite (see `docs/FINAL_TECHNICAL_AUDIT.md`).
 
 ### Frontend
 
@@ -132,7 +148,7 @@ npm run test:integrity
 npm run build
 ```
 
-Expected: **7 frontend tests** passing, no lint errors, clean build.
+Expected: **12 frontend tests** passing, no lint errors, clean build.
 
 ---
 
@@ -174,7 +190,7 @@ backend/                FastAPI application, data preparation, configuration
 demo/                   Official synthetic demonstration dataset
 frontend/               Next.js 16 + TypeScript + Recharts UI
 scripts/                Reproducible demo runner
-tests/                  380 Python test cases
+tests/                  Python unit, integration and adversarial regressions
 verification/           DeterministicVerifier (rule-based numerical checks)
 visualization/          VerifiedVisualizationBuilder (chart specs from evidence)
 ```
@@ -187,6 +203,18 @@ visualization/          VerifiedVisualizationBuilder (chart specs from evidence)
 - Every analytical result carries a **SHA-256 trace hash** for provenance.
 - The verifier checks **numerical consistency** — it does not claim causal proof.
 - The demo is **fully reproducible** without a live LLM or network connection.
+
+The API constructs metadata explicitly; direct pipeline/planner contexts also
+accept only typed schema/profile metadata. Column names and the business question
+are supplied text, so do not put private cell contents in either. Verification
+checks numerical consistency and selected structural rules; it does not rerun
+every statistic or validate every statistical assumption.
+
+The API is intended for a trusted local demo: datasets and analyses remain in
+process memory without authentication, retention limits or tenant isolation.
+Restarting loses them, and multiple workers do not share them. The upload reader
+is bounded, but multipart spooling, request body limits, rate limits and total
+memory limits still require deployment controls before public use.
 
 ---
 
