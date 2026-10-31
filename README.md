@@ -119,7 +119,7 @@ cd ~/VERA
 PYTHONPATH=. python -m pytest -q
 ```
 
-Expected: **361 passed**.
+Expected: **380 passed**.
 
 ### Frontend
 
@@ -174,7 +174,7 @@ backend/                FastAPI application, data preparation, configuration
 demo/                   Official synthetic demonstration dataset
 frontend/               Next.js 16 + TypeScript + Recharts UI
 scripts/                Reproducible demo runner
-tests/                  361 Python test cases
+tests/                  380 Python test cases
 verification/           DeterministicVerifier (rule-based numerical checks)
 visualization/          VerifiedVisualizationBuilder (chart specs from evidence)
 ```
