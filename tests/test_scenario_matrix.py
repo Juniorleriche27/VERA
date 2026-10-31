@@ -160,7 +160,7 @@ def test_scenario_9_one_tool_investigation(sample_sales_df):
         tool="one_way_anova",
         objective="Compare regional sales",
         reason="Targeted group comparison",
-        parameters={"alpha": 0.05},
+        parameters={},
         bindings={"grouping_column": "region", "value_column": "sales"},
     )
     pipeline = VerifiedAnalyticsPipeline(

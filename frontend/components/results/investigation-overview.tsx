@@ -7,7 +7,7 @@ export function InvestigationOverview({ analysis }: { analysis: AnalysisResponse
   const metrics = [
     { label: "Analytical steps", value: analysis.steps.length, Icon: GitBranch },
     { label: "Verified evidence", value: analysis.decision_brief?.evidence_count ?? 0, Icon: ShieldCheck },
-    { label: "Tools used", value: analysis.decision_brief?.tools_used.length ?? 0, Icon: Layers3 },
+    { label: "Tools used", value: analysis.decision_brief?.tools_used?.length ?? 0, Icon: Layers3 },
     { label: "Visualizations", value: analysis.visualizations.length, Icon: FileBarChart2 },
   ];
 

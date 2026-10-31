@@ -16,10 +16,12 @@ class MetaModelError(RuntimeError):
 _FORBIDDEN_CONTEXT_KEYS = {
     "data",
     "dataframe",
+    "df",
     "observations",
     "raw_data",
     "records",
     "rows",
+    "values",
 }
 _TOOL_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -124,21 +126,22 @@ def _binding_guidance(name: str) -> str:
     if name in {"linear_trend", "mean_shift_change_point", "variance_shift_change_point", "moving_average_trend", "additive_seasonal_decomposition"}:
         return (
             'Use bindings {"time_column":"date","value_column":"sales","aggregation":"sum"} '
-            "when the measure is additive; sum/mean must be deliberate. "
-            "Place window, period, threshold or min_segment_size in parameters, not bindings."
+            "when the measure is additive; aggregation ('sum' or 'mean') belongs in bindings, not parameters. "
+            "For linear_trend, parameters must be an empty object {}. "
+            "Place method settings such as min_segment_size, threshold, or variance_ratio_threshold in parameters."
         )
     if name == "bayesian_structural_causal_impact":
         return (
             'Use bindings {"time_column":"date","value_column":"sales",'
             '"aggregation":"sum","intervention_date":"2026-09-01",'
             '"control_columns":["control_sales"]} if these columns and date exist. '
-            "Use value_column (the current Binder contract), not outcome_column. "
-            "Provide a date from the available context; never invent dates or controls."
+            "Notice: intervention_date belongs strictly in bindings, not parameters. "
+            "Place method settings such as credibility or prior_scale in parameters."
         )
     if name in {"one_way_anova", "kruskal_wallis_test"}:
-        return 'Use bindings {"grouping_column":"region","value_column":"sales"} when roles match.'
+        return 'Use bindings {"grouping_column":"region","value_column":"sales"}. ANOVA and Kruskal take no execution parameters (parameters must be empty {}).'
     if name == "mann_whitney_u_test":
-        return 'Use grouping_column, value_column and existing group_a/group_b names; never invent groups.'
+        return 'Use bindings {"grouping_column":"region","value_column":"sales"} with optional group_a/group_b names in bindings; place alternative ("two-sided", "greater", "less") in parameters.'
     return ""
 
 
@@ -159,12 +162,8 @@ _TOOL_SPECIFIC_SCHEMAS: dict[str, dict[str, Any]] = {
                 "description": "Aggregation method for repeated timestamps ('sum' or 'mean').",
             },
         },
-        "parameters_properties": {
-            "min_periods": {
-                "type": "integer",
-                "description": "Minimum required periods (default 3).",
-            },
-        },
+        "required_bindings": ["time_column", "value_column"],
+        "parameters_properties": {},
     },
     "mean_shift_change_point": {
         "bindings_properties": {
@@ -182,14 +181,15 @@ _TOOL_SPECIFIC_SCHEMAS: dict[str, dict[str, Any]] = {
                 "description": "Aggregation method for repeated timestamps ('sum' or 'mean').",
             },
         },
+        "required_bindings": ["time_column", "value_column"],
         "parameters_properties": {
             "min_segment_size": {
                 "type": "integer",
-                "description": "Minimum observations in each segment before/after change point (e.g. 10).",
+                "description": "Minimum observations in each segment before/after change point (integer >= 2, default 2).",
             },
             "threshold": {
                 "type": "number",
-                "description": "Change detection sensitivity threshold.",
+                "description": "Change detection standardized mean-shift sensitivity threshold (finite number > 0, default 1.0).",
             },
         },
     },
@@ -209,10 +209,15 @@ _TOOL_SPECIFIC_SCHEMAS: dict[str, dict[str, Any]] = {
                 "description": "Aggregation method ('sum' or 'mean').",
             },
         },
+        "required_bindings": ["time_column", "value_column"],
         "parameters_properties": {
             "min_segment_size": {
                 "type": "integer",
-                "description": "Minimum observations per segment.",
+                "description": "Minimum observations per segment (integer >= 2, default 3).",
+            },
+            "variance_ratio_threshold": {
+                "type": "number",
+                "description": "Variance ratio threshold strictly greater than 1 (finite number > 1.0, default 4.0).",
             },
         },
     },
@@ -227,12 +232,8 @@ _TOOL_SPECIFIC_SCHEMAS: dict[str, dict[str, Any]] = {
                 "description": "Continuous numeric measure to compare across groups (e.g. 'sales').",
             },
         },
-        "parameters_properties": {
-            "alpha": {
-                "type": "number",
-                "description": "Significance level decision threshold (default 0.05).",
-            },
-        },
+        "required_bindings": ["grouping_column", "value_column"],
+        "parameters_properties": {},
     },
     "kruskal_wallis_test": {
         "bindings_properties": {
@@ -245,12 +246,8 @@ _TOOL_SPECIFIC_SCHEMAS: dict[str, dict[str, Any]] = {
                 "description": "Continuous numeric measure to compare ranks across groups.",
             },
         },
-        "parameters_properties": {
-            "alpha": {
-                "type": "number",
-                "description": "Significance level decision threshold (default 0.05).",
-            },
-        },
+        "required_bindings": ["grouping_column", "value_column"],
+        "parameters_properties": {},
     },
     "mann_whitney_u_test": {
         "bindings_properties": {
@@ -271,6 +268,7 @@ _TOOL_SPECIFIC_SCHEMAS: dict[str, dict[str, Any]] = {
                 "description": "Second group name (optional if exactly 2 groups).",
             },
         },
+        "required_bindings": ["grouping_column", "value_column"],
         "parameters_properties": {
             "alternative": {
                 "type": "string",
@@ -304,14 +302,15 @@ _TOOL_SPECIFIC_SCHEMAS: dict[str, dict[str, Any]] = {
                 "description": "Temporal aggregation method ('sum' or 'mean').",
             },
         },
+        "required_bindings": ["time_column", "value_column", "intervention_date"],
         "parameters_properties": {
             "credibility": {
                 "type": "number",
-                "description": "Credible interval probability (default 0.95).",
+                "description": "Credible interval probability strictly between 0 and 1 (default 0.95).",
             },
             "prior_scale": {
                 "type": "number",
-                "description": "Prior standard deviation scale (default 10.0).",
+                "description": "Prior standard deviation scale, finite positive number (default 10.0).",
             },
         },
     },
@@ -340,6 +339,38 @@ def build_meta_tools(
         spec = _TOOL_SPECIFIC_SCHEMAS.get(item["name"])
         bindings_props: dict[str, Any] = dict(spec["bindings_properties"]) if spec else {}
         params_props: dict[str, Any] = dict(spec["parameters_properties"]) if spec else {}
+        required_bindings: list[str] = list(spec.get("required_bindings", [])) if spec else []
+
+        parameters_schema: dict[str, Any] = {
+            "type": "object",
+            "description": (
+                "Method configuration only. For tools without execution settings, "
+                "this must be an empty object {}."
+            ),
+            "properties": params_props,
+            "additionalProperties": False if spec is not None else True,
+        }
+
+        bindings_schema: dict[str, Any] = {
+            "type": "object",
+            "description": (
+                "Logical references to dataset columns or prior "
+                "evidence. Do not include raw observations."
+            ),
+            "properties": bindings_props,
+            "additionalProperties": False if spec is not None else {
+                "oneOf": [
+                    {"type": "string"},
+                    {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    {"type": "null"},
+                ]
+            },
+        }
+        if required_bindings:
+            bindings_schema["required"] = required_bindings
 
         tools.append(
             {
@@ -362,33 +393,8 @@ def build_meta_tools(
                                     "Why this analytical method is appropriate now."
                                 ),
                             },
-                            "parameters": {
-                                "type": "object",
-                                "description": (
-                                    "Method configuration only, such as alpha, lag, "
-                                    "threshold, alternative, or horizon."
-                                ),
-                                "properties": params_props,
-                                "additionalProperties": True,
-                            },
-                            "bindings": {
-                                "type": "object",
-                                "description": (
-                                    "Logical references to dataset columns or prior "
-                                    "evidence. Do not include raw observations."
-                                ),
-                                "properties": bindings_props,
-                                "additionalProperties": {
-                                    "oneOf": [
-                                        {"type": "string"},
-                                        {
-                                            "type": "array",
-                                            "items": {"type": "string"},
-                                        },
-                                        {"type": "null"},
-                                    ]
-                                },
-                            },
+                            "parameters": parameters_schema,
+                            "bindings": bindings_schema,
                             "source_call_ids": {
                                 "type": "array",
                                 "items": {"type": "string"},
@@ -429,30 +435,109 @@ def _validate_semantic_tool_contract(
                 f"Tool call {call_id!r} 'bindings' contains forbidden raw data key: {key!r}."
             )
 
-    agg = bindings.get("aggregation") or parameters.get("aggregation")
-    if agg is not None and agg not in ("sum", "mean"):
+    # Aggregation rule: aggregation belongs to bindings, NOT parameters
+    if "aggregation" in parameters:
         raise MetaModelError(
-            f"Tool call {call_id!r} specifies invalid aggregation {agg!r}; must be 'sum' or 'mean'."
+            f"Tool call {call_id!r} placed 'aggregation' in 'parameters'. "
+            "For temporal tools, 'aggregation' is a dataset preparation instruction "
+            "that must belong to 'bindings', not 'parameters'."
         )
+    if "aggregation" in bindings:
+        agg = bindings["aggregation"]
+        if agg not in ("sum", "mean"):
+            raise MetaModelError(
+                f"Tool call {call_id!r} specifies invalid aggregation {agg!r}; must be 'sum' or 'mean'."
+            )
 
-    for param_name in ("alpha", "credibility"):
-        if param_name in parameters:
-            val = parameters[param_name]
-            if isinstance(val, bool) or not isinstance(val, (int, float)) or val <= 0.0 or val >= 1.0:
-                raise MetaModelError(
-                    f"Tool call {call_id!r} parameter {param_name!r} must be a number strictly between 0 and 1."
-                )
-
+    # Causal impact rules:
     if tool == "bayesian_structural_causal_impact":
-        if "intervention_date" not in bindings and "intervention_date" not in parameters:
+        if "intervention_date" in parameters:
+            raise MetaModelError(
+                f"Tool call {call_id!r} placed 'intervention_date' in 'parameters'. "
+                "Causal impact requires 'intervention_date' in 'bindings', not 'parameters'."
+            )
+        if "intervention_date" not in bindings:
             raise MetaModelError(
                 f"Tool call {call_id!r} for 'bayesian_structural_causal_impact' requires an 'intervention_date' binding."
             )
-        date_val = bindings.get("intervention_date") or parameters.get("intervention_date")
+        date_val = bindings.get("intervention_date")
         if not isinstance(date_val, str) or not date_val.strip():
             raise MetaModelError(
                 f"Tool call {call_id!r} 'intervention_date' must be a non-empty string."
             )
+
+    spec = _TOOL_SPECIFIC_SCHEMAS.get(tool)
+    if spec is not None:
+        # Check required bindings
+        for req in spec.get("required_bindings", []):
+            if req not in bindings:
+                raise MetaModelError(
+                    f"Tool call {call_id!r} for {tool!r} is missing required binding {req!r}."
+                )
+            val = bindings[req]
+            if not isinstance(val, str) or not val.strip():
+                raise MetaModelError(
+                    f"Tool call {call_id!r} binding {req!r} must be a non-empty string."
+                )
+
+        # Check unknown parameters (additionalProperties: False)
+        allowed_params = set(spec.get("parameters_properties", {}).keys())
+        unknown_params = set(parameters.keys()) - allowed_params
+        if unknown_params:
+            raise MetaModelError(
+                f"Tool call {call_id!r} for {tool!r} returned unsupported parameter keys: {sorted(unknown_params)}."
+            )
+
+        # Check unknown bindings (additionalProperties: False)
+        allowed_bindings = set(spec.get("bindings_properties", {}).keys())
+        unknown_bindings = set(bindings.keys()) - allowed_bindings
+        if unknown_bindings:
+            raise MetaModelError(
+                f"Tool call {call_id!r} for {tool!r} returned unsupported binding keys: {sorted(unknown_bindings)}."
+            )
+
+        # Validate parameter bounds:
+        if "min_segment_size" in parameters:
+            val = parameters["min_segment_size"]
+            if isinstance(val, bool) or not isinstance(val, int) or val < 2:
+                raise MetaModelError(
+                    f"Tool call {call_id!r} parameter 'min_segment_size' must be an integer >= 2."
+                )
+
+        if "threshold" in parameters:
+            val = parameters["threshold"]
+            if isinstance(val, bool) or not isinstance(val, (int, float)) or not (val > 0) or val == float("inf"):
+                raise MetaModelError(
+                    f"Tool call {call_id!r} parameter 'threshold' must be a finite number > 0."
+                )
+
+        if "variance_ratio_threshold" in parameters:
+            val = parameters["variance_ratio_threshold"]
+            if isinstance(val, bool) or not isinstance(val, (int, float)) or not (val > 1.0) or val == float("inf"):
+                raise MetaModelError(
+                    f"Tool call {call_id!r} parameter 'variance_ratio_threshold' must be a finite number > 1."
+                )
+
+        if "alternative" in parameters:
+            val = parameters["alternative"]
+            if val not in ("two-sided", "greater", "less"):
+                raise MetaModelError(
+                    f"Tool call {call_id!r} parameter 'alternative' must be 'two-sided', 'greater', or 'less'."
+                )
+
+        if "credibility" in parameters:
+            val = parameters["credibility"]
+            if isinstance(val, bool) or not isinstance(val, (int, float)) or val <= 0.0 or val >= 1.0:
+                raise MetaModelError(
+                    f"Tool call {call_id!r} parameter 'credibility' must be a number strictly between 0 and 1."
+                )
+
+        if "prior_scale" in parameters:
+            val = parameters["prior_scale"]
+            if isinstance(val, bool) or not isinstance(val, (int, float)) or not (val > 0) or val == float("inf"):
+                raise MetaModelError(
+                    f"Tool call {call_id!r} parameter 'prior_scale' must be a finite positive number."
+                )
 
 
 def _validate_bindings(bindings: Any) -> dict[str, Any]:
@@ -568,9 +653,11 @@ class MetaModelPlanner:
             "analytics tools are needed to answer the user's business question. "
             "Use only the supplied function tools. The dataset context contains "
             "metadata and safe aggregates, not raw rows. Never request or invent "
-            "raw dataset values. Put only column names or semantic references in "
-            "bindings. Put method settings in parameters. Explain each tool call "
-            "with a concrete objective and reason.\n\n"
+            "raw dataset values. Put column names, semantic references, and dataset "
+            "preparation instructions (such as 'aggregation' and 'intervention_date') in bindings. "
+            "Put method configuration settings in parameters. For tools without execution "
+            "parameters (such as linear_trend, one_way_anova, kruskal_wallis_test), parameters must be an empty object {}. "
+            "Explain each tool call with a concrete objective and reason.\n\n"
             "Query Scope Guidelines:\n"
             "- Multi-part diagnostic queries (e.g. asking why a metric declined, "
             "when it started, whether regions differ, and if an intervention helped): "

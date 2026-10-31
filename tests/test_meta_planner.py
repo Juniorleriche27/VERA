@@ -57,10 +57,10 @@ def _tool_call(
         arguments = {
             "objective": "Compare regional sales",
             "reason": "Test whether regional means differ",
-            "parameters": {"alpha": 0.05},
+            "parameters": {},
             "bindings": {
-                "measure": "sales",
-                "group": "region",
+                "grouping_column": "region",
+                "value_column": "sales",
             },
             "source_call_ids": [],
         }
@@ -199,10 +199,10 @@ def test_single_meta_tool_call_becomes_planned_trace():
     trace = result.traces[0]
     assert trace.call_id == "call-1"
     assert trace.tool == "one_way_anova"
-    assert trace.parameters == {"alpha": 0.05}
+    assert trace.parameters == {}
     assert trace.bindings == {
-        "group": "region",
-        "measure": "sales",
+        "grouping_column": "region",
+        "value_column": "sales",
     }
 
 

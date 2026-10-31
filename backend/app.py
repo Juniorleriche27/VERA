@@ -54,6 +54,8 @@ def _safe_dataset_profile(frame: pd.DataFrame) -> dict[str, Any]:
 
 
 def _brief_payload(brief: Any) -> Any:
+    if hasattr(brief, "as_dict") and callable(brief.as_dict):
+        return jsonable_encoder(brief.as_dict())
     return jsonable_encoder(brief)
 
 

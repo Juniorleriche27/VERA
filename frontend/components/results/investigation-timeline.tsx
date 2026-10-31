@@ -109,7 +109,7 @@ export function InvestigationTimeline({ steps }: { steps: AnalysisStep[] }) {
                     </span>
                     <ChevronRight size={12} className="text-[#99aa9f]" />
                     <span className="inline-flex items-center gap-1 font-semibold text-[#486352]">
-                      <CheckCircle2 size={12} className="text-[#2b7854]" /> Executed
+                      <CheckCircle2 size={12} className="text-[#2b7854]" /> Deterministically Executed
                     </span>
                     <ChevronRight size={12} className="text-[#99aa9f]" />
                     <span
