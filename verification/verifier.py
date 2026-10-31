@@ -97,6 +97,72 @@ def _explicit_negative_flag(result: Mapping[str, Any]) -> tuple[str, str] | None
     return None
 
 
+def _extract_verification_payload(
+    trace: ToolCallTrace, result: Mapping[str, Any]
+) -> tuple[Mapping[str, Any], list[VerificationCheck], Mapping[str, Any]]:
+    """Read the engine's nested analytical fields without rewriting evidence."""
+    checks: list[VerificationCheck] = []
+    if not {"status", "method", "result"}.intersection(result):
+        return result, checks, {}
+    # An engine envelope is identifiable by its status/method metadata.
+    if "status" not in result and "method" not in result:
+        return result, checks, {}
+    status_ok = result.get("status") == "success"
+    method_ok = result.get("method") == trace.tool
+    payload = result.get("result")
+    payload_ok = isinstance(payload, Mapping)
+    for code, ok, message in (
+        ("engine_status", status_ok, "Engine status must be 'success'."),
+        ("engine_method", method_ok, "Engine method must match the trace tool."),
+        ("engine_result", payload_ok, "Engine analytical result must be a mapping."),
+    ):
+        checks.append(VerificationCheck(code, ok, CheckSeverity.CRITICAL, message))
+    warnings = result.get("warnings", [])
+    checks.append(VerificationCheck(
+        "engine_warnings", not bool(warnings), CheckSeverity.WARNING,
+        "Engine warnings: " + str(warnings) if warnings else "No engine warnings.",
+    ))
+    diagnostics = result.get("diagnostics", {})
+    return payload if payload_ok else {}, checks, diagnostics if isinstance(diagnostics, Mapping) else {}
+
+
+def _check_causal_structure(
+    result: Mapping[str, Any], *, tool: str
+) -> list[VerificationCheck]:
+    checks: list[VerificationCheck] = []
+    if "causal_interpretation" in result:
+        checks.append(VerificationCheck(
+            "causal_assumptions_scope", True, CheckSeverity.INFO,
+            "Numerical consistency does not establish causal validity independently of model and counterfactual assumptions.",
+        ))
+    fields = ("sample_size", "pre_intervention_count", "post_intervention_count", "intervention_index")
+    if tool == "bayesian_structural_causal_impact":
+        present = all(key in result for key in fields)
+        numbers = [_number(result[key]) for key in fields] if present else []
+        valid = present and all(v is not None and v >= 0 and v.is_integer() for v in numbers)
+        if valid:
+            sample, pre, post, index = numbers
+            valid = pre + post == sample and index == pre and pre > 0 and post > 0
+        checks.append(VerificationCheck(
+            "causal_sample_structure", valid, CheckSeverity.CRITICAL,
+            "Causal counts must exist, add up and intervention index must equal pre-intervention count.",
+        ))
+    return checks
+
+
+def _check_change_index(result: Mapping[str, Any]) -> VerificationCheck | None:
+    if result.get("detected") is not True or "change_index" not in result or "sample_size" not in result:
+        return None
+    index = _number(result["change_index"])
+    sample = _number(result["sample_size"])
+    valid = (index is not None and sample is not None and index.is_integer()
+             and sample.is_integer() and 0 <= index < sample)
+    return VerificationCheck(
+        "change_index_bounds", valid, CheckSeverity.CRITICAL,
+        "Detected change index must be a valid zero-based position in the sample.",
+    )
+
+
 class DeterministicVerifier:
     """Rule-based verifier for deterministic analytical tool outputs."""
 
@@ -170,8 +236,13 @@ class DeterministicVerifier:
                 checks,
             )
 
+        payload, envelope_checks, diagnostics = _extract_verification_payload(trace, result)
+        checks.extend(envelope_checks)
+        if any(not check.passed and check.severity is CheckSeverity.CRITICAL for check in envelope_checks):
+            return self._report(trace, VerificationStatus.REJECTED, "rerun_tool_with_valid_output", checks)
+
         probability_failures = []
-        for field, value in _iter_probability_fields(result):
+        for field, value in _iter_probability_fields(payload):
             number = _number(value)
             if number is None or not 0.0 <= number <= 1.0:
                 probability_failures.append(field)
@@ -197,9 +268,17 @@ class DeterministicVerifier:
                 checks,
             )
 
-        interval_check = self._check_intervals(result)
+        interval_check = self._check_intervals(payload)
         checks.append(interval_check)
-        if not interval_check.passed:
+        structural_checks = _check_causal_structure(payload, tool=trace.tool)
+        change_check = _check_change_index(payload)
+        if change_check is not None:
+            structural_checks.append(change_check)
+        checks.extend(structural_checks)
+        if not interval_check.passed or any(
+            not check.passed and check.severity is CheckSeverity.CRITICAL
+            for check in structural_checks
+        ):
             return self._report(
                 trace,
                 VerificationStatus.REJECTED,
@@ -207,7 +286,7 @@ class DeterministicVerifier:
                 checks,
             )
 
-        missingness_check = self._check_missingness(result)
+        missingness_check = self._check_missingness(payload)
         if missingness_check is not None:
             checks.append(missingness_check)
             if not missingness_check.passed:
@@ -218,7 +297,7 @@ class DeterministicVerifier:
                     checks,
                 )
 
-        sample_check = self._check_sample_size(result)
+        sample_check = self._check_sample_size(payload)
         if sample_check is not None:
             checks.append(sample_check)
             if not sample_check.passed:
@@ -229,7 +308,7 @@ class DeterministicVerifier:
                     checks,
                 )
 
-        negative_flag = _explicit_negative_flag(result)
+        negative_flag = _explicit_negative_flag(payload) or _explicit_negative_flag(diagnostics)
         if negative_flag is not None:
             key, message = negative_flag
             checks.append(
@@ -343,6 +422,31 @@ class DeterministicVerifier:
             upper = _number(result[upper_key])
             if lower is None or upper is None or lower > upper:
                 invalid.append(f"{lower_key}/{upper_key}")
+
+        scalar_intervals = (
+            "absolute_effect_interval", "relative_effect_interval_percent",
+        )
+        collection_intervals = (
+            "counterfactual_post_interval", "point_effect_interval",
+        )
+
+        def valid_pair(value: Any) -> bool:
+            if not isinstance(value, (list, tuple)) or len(value) != 2:
+                return False
+            lower, upper = (_number(value[0]), _number(value[1]))
+            return lower is not None and upper is not None and lower <= upper
+
+        for name in scalar_intervals:
+            if name in result and not valid_pair(result[name]):
+                invalid.append(name)
+        for name in collection_intervals:
+            if name not in result:
+                continue
+            intervals = result[name]
+            if not isinstance(intervals, (list, tuple)) or not intervals or any(
+                not valid_pair(pair) for pair in intervals
+            ):
+                invalid.append(name)
 
         return VerificationCheck(
             code="interval_order",
