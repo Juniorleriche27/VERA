@@ -303,6 +303,10 @@ class DatasetBinder:
 
     GROUPED_TOOLS = frozenset({"one_way_anova", "kruskal_wallis_test"})
     VALUE_TOOLS = frozenset({"descriptive_statistics"})
+    TEMPORAL_TOOLS = frozenset({
+        "linear_trend", "mean_shift_change_point", "variance_shift_change_point",
+        "moving_average_trend", "additive_seasonal_decomposition",
+    })
 
     def bind(self, trace: ToolCallTrace, dataset: Any) -> BoundToolCall:
         if not isinstance(trace, ToolCallTrace):
@@ -318,6 +322,10 @@ class DatasetBinder:
             bound = self._bind_mann_whitney(frame, semantic)
         elif trace.tool in self.VALUE_TOOLS:
             bound = self._bind_values(frame, semantic)
+        elif trace.tool in self.TEMPORAL_TOOLS:
+            bound = self._bind_temporal(frame, semantic)
+        elif trace.tool == "bayesian_structural_causal_impact":
+            bound = self._bind_causal(frame, semantic)
         else:
             bound = self._bind_generic(frame, semantic)
 
@@ -400,7 +408,88 @@ class DatasetBinder:
         if not sample_a or not sample_b:
             raise DataBindingError("Selected Mann-Whitney groups must exist in the dataset.")
 
-        return {"sample_a": sample_a, "sample_b": sample_b}
+        return {"data": {str(requested_a): sample_a, str(requested_b): sample_b}}
+
+    @staticmethod
+    def _time_series(frame: pd.DataFrame, semantic: Mapping[str, Any], *, value_column: str | None = None):
+        """Resolve explicit semantic references and build one local chronological view."""
+        time_name = _column(frame, semantic.get("time_column"), "time_column")
+        value_name = _column(
+            frame, value_column if value_column is not None else semantic.get("value_column"),
+            "value_column",
+        )
+        aggregation = semantic.get("aggregation")
+        if aggregation is not None and aggregation not in ("sum", "mean"):
+            raise DataBindingError("'aggregation' must be 'sum' or 'mean'.")
+        # Local import avoids agent -> backend.__init__ -> app -> agent cycle.
+        from backend.data_preparation import DatasetPreparationError, build_time_series
+
+        try:
+            # With one row per timestamp, sum and mean have identical output.
+            # Even when ISO representations differ, duplicates must not be
+            # silently aggregated: compare post-parsing period count to rows.
+            view = build_time_series(
+                frame, time_column=time_name, value_column=value_name,
+                aggregation=aggregation or "sum",
+            )
+            if aggregation is None and view.period_count != view.source_row_count:
+                raise DataBindingError(
+                    "Repeated timestamps require explicit 'aggregation': 'sum' or 'mean'."
+                )
+            return view
+        except DatasetPreparationError as exc:
+            raise DataBindingError(str(exc)) from exc
+
+    def _bind_temporal(
+        self, frame: pd.DataFrame, semantic: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        view = self._time_series(frame, semantic)
+        return {
+            "time": [timestamp.isoformat() for timestamp in view.timestamps],
+            "values": list(view.values),
+        }
+
+    def _bind_causal(
+        self, frame: pd.DataFrame, semantic: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Build aligned local outcome and optional control arrays.
+
+        Controls are separate numeric columns sharing the same timestamps.
+        No fuzzy joins, missing-period fills or inferred intervention dates.
+        """
+        if "intervention_date" not in semantic:
+            raise DataBindingError("Causal impact requires 'intervention_date'.")
+        view = self._time_series(frame, semantic)
+        from backend.data_preparation import DatasetPreparationError, resolve_intervention_index
+
+        try:
+            index = resolve_intervention_index(view, semantic["intervention_date"])
+        except DatasetPreparationError as exc:
+            raise DataBindingError(str(exc)) from exc
+        controls: dict[str, list[float]] = {}
+        requested_controls = semantic.get("control_columns", [])
+        if not isinstance(requested_controls, list) or any(
+            not isinstance(name, str) or not name.strip() for name in requested_controls
+        ):
+            raise DataBindingError("'control_columns' must be a list of column names.")
+        if len(requested_controls) != len(set(requested_controls)):
+            raise DataBindingError("Control column references must be unique.")
+        outcome_column = _column(frame, semantic.get("value_column"), "value_column")
+        for name in requested_controls:
+            control_column = _column(frame, name, "control_columns")
+            if control_column == outcome_column:
+                raise DataBindingError("Control cannot reference the outcome column.")
+            control_view = self._time_series(frame, semantic, value_column=control_column)
+            if control_view.timestamps != view.timestamps:
+                raise DataBindingError(
+                    f"Control column {control_column!r} does not match outcome timestamps."
+                )
+            controls[control_column] = list(control_view.values)
+        return {
+            "outcome": list(view.values),
+            "intervention_index": index,
+            "controls": controls,
+        }
 
     def _bind_generic(
         self,

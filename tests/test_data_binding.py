@@ -111,7 +111,7 @@ def test_mann_whitney_infers_two_groups():
         frame,
     )
 
-    assert bound.bindings == {"sample_a": [1, 2], "sample_b": [8, 9]}
+    assert bound.bindings == {"data": {"A": [1, 2], "B": [8, 9]}}
 
 
 def test_mann_whitney_requires_explicit_groups_when_more_than_two():
