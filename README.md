@@ -105,7 +105,7 @@ The UI will be available at `http://localhost:3000`.
 
 ### Frontend environment
 
-Copy `frontend/.env.example` to `frontend/.env.local` and set `NEXT_PUBLIC_API_URL`
+Copy `frontend/.env.example` to `frontend/.env.local` and set `NEXT_PUBLIC_VERA_API_URL`
 to the backend URL (default: `http://localhost:8000`).
 
 ---
