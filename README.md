@@ -157,7 +157,7 @@ npm run test:integrity
 npm run build
 ```
 
-Expected: **12 frontend tests** passing, no lint errors, clean build.
+Expected: **27 frontend tests** passing, no lint errors, clean build.
 
 ---
 
@@ -228,3 +228,20 @@ memory limits still require deployment controls before public use.
 ---
 
 *The pre-existing engine and the hackathon extensions remain explicitly separated for auditability.*
+
+## Live orchestration
+
+The frontend observes real backend events through `POST /analyses/stream` (SSE
+consumed using fetch). The existing synchronous `POST /analyses` remains supported.
+A completed stream supplies an analysis ID and safe counts; the existing
+`GET /analyses/{analysis_id}` supplies the final evidence, brief and chart specs.
+No dataset rows, bound arrays, provider prompts or provider errors appear in the
+SSE stream. The UI retains the received event history even for very fast tools.
+There are no simulated execution delays or progress percentages.
+
+See [event contract, validation and browser results](docs/LIVE_ORCHESTRATION.md).
+Run the local API with one worker: analysis storage remains process-local, so
+multiple workers would need shared storage or sticky routing for the final GET.
+Disconnect cancels work at the next event boundary; it cannot forcibly stop a
+provider request already in flight. A dropped stream is reported explicitly and
+is not automatically replayed as a duplicate investigation.

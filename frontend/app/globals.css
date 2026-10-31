@@ -22,3 +22,15 @@ button:disabled { cursor: not-allowed; }
 .input-card.is-dragging { border-color: var(--primary); background: #eef8f1; }
 .metric-number { font-variant-numeric: tabular-nums; letter-spacing: -.04em; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+
+/* Compact the setup only once a real investigation request is in progress/history.
+   These are layout changes, never timed or simulated execution states. */
+@media (min-width: 1024px) {
+  main[data-investigation-active="true"] [data-workspace-breadcrumb],
+  main[data-investigation-active="true"] [data-hero-detail],
+  main[data-investigation-active="true"] [data-input-heading] { display: none; }
+  main[data-investigation-active="true"] [data-workspace-hero] { padding-bottom: 12px; }
+  main[data-investigation-active="true"] h1 { font-size: 28px; }
+  main[data-investigation-active="true"] [data-investigation-heading] { margin-top: 12px; margin-bottom: 12px; }
+  main[data-investigation-active="true"] textarea { height: 84px; min-height: 84px; }
+}

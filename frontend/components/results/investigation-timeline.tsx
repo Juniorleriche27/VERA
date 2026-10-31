@@ -105,7 +105,7 @@ export function InvestigationTimeline({ steps }: { steps: AnalysisStep[] }) {
                   {/* 3-Stage Pipeline Status Indicator */}
                   <div className="mt-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-[#e7eee8] bg-[#f8faf8] px-3 py-2 text-[10.5px]">
                     <span className="inline-flex items-center gap-1 font-semibold text-[#486352]">
-                      <CheckCircle2 size={12} className="text-[#2b7854]" /> AI Selected
+                      <CheckCircle2 size={12} className="text-[#2b7854]" /> {step.trace.source_call_ids.length ? "Deterministic follow-up" : "AI Selected"}
                     </span>
                     <ChevronRight size={12} className="text-[#99aa9f]" />
                     <span className="inline-flex items-center gap-1 font-semibold text-[#486352]">

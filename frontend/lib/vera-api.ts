@@ -1,3 +1,4 @@
+import { consumeAnalysisStream, type AnalysisEvent } from "./analysis-stream";
 import type { AnalysisResponse, DatasetUploadResponse, HealthResponse } from "@/types/vera";
 
 const FALLBACK_API_URL = "http://127.0.0.1:8000";
@@ -62,6 +63,27 @@ export const veraApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dataset_id: datasetId, question }),
     }),
+  streamAnalysis: async (datasetId: string, question: string, onEvent: (event: AnalysisEvent) => void, signal: AbortSignal): Promise<AnalysisResponse> => {
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE_URL}/analyses/stream`, {
+        method: "POST", cache: "no-store", signal,
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({ dataset_id: datasetId, question }),
+      });
+    } catch (error) {
+      if (signal.aborted) throw error;
+      throw new VeraApiError("Could not reach VERA API. Check that the backend is running and its CORS origin is configured.");
+    }
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new VeraApiError(detailMessage(payload?.detail) || `The request failed (HTTP ${response.status}).`, response.status);
+    }
+    if (!response.headers.get("content-type")?.includes("text/event-stream") || !response.body)
+      throw new VeraApiError("The API did not return a live event stream.");
+    const analysisId = await consumeAnalysisStream(response.body, onEvent);
+    return request<AnalysisResponse>(`/analyses/${encodeURIComponent(analysisId)}`, { signal });
+  },
   getAnalysis: (analysisId: string) => request<AnalysisResponse>(`/analyses/${encodeURIComponent(analysisId)}`),
 };
 

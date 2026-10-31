@@ -6,13 +6,15 @@ from uuid import uuid4
 
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
-from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from agent.groq_planner import GroqModelError, GroqModelPlanner
 from agent.meta_planner import MetaModelError
-from agent.pipeline import PipelineError, VerifiedAnalyticsPipeline
+from agent.pipeline import PipelineError
+from fastapi.responses import StreamingResponse
+from backend.analysis import _brief_payload, run_analysis
+from backend.streaming import analysis_stream
 from backend.config import AppSettings, get_settings
 from backend.data_preparation import DatasetPreparationError, prepare_dataset
 
@@ -55,12 +57,6 @@ def _safe_dataset_profile(frame: pd.DataFrame) -> dict[str, Any]:
         "column_count": int(len(frame.columns)),
         "columns": columns,
     }
-
-
-def _brief_payload(brief: Any) -> Any:
-    if hasattr(brief, "as_dict") and callable(brief.as_dict):
-        return jsonable_encoder(brief.as_dict())
-    return jsonable_encoder(brief)
 
 
 def create_app(
@@ -153,8 +149,7 @@ def create_app(
             "profile": profile,
         }
 
-    @app.post("/analyses", status_code=status.HTTP_201_CREATED)
-    def create_analysis(request: AnalysisRequest) -> dict[str, Any]:
+    def analysis_input(request: AnalysisRequest) -> tuple[dict[str, Any], str]:
         dataset = app.state.datasets.get(request.dataset_id)
         if dataset is None:
             raise HTTPException(
@@ -169,46 +164,31 @@ def create_app(
                 detail="Question must not be blank.",
             )
 
+        return dataset, question
+
+    @app.post("/analyses", status_code=status.HTTP_201_CREATED)
+    def create_analysis(request: AnalysisRequest) -> dict[str, Any]:
+        dataset, question = analysis_input(request)
         try:
-            planner = app.state.planner_factory()
-            pipeline = VerifiedAnalyticsPipeline(planner)
-            result = pipeline.run(
-                question,
-                dataset=dataset["frame"],
-                dataset_context=dataset["profile"],
+            return run_analysis(
+                analysis_id=uuid4().hex, dataset_id=request.dataset_id, question=question,
+                dataset=dataset, planner_factory=app.state.planner_factory, analyses=app.state.analyses,
             )
         except GroqModelError as exc:
             raise HTTPException(status_code=503, detail="Planning provider is not configured.") from exc
         except (MetaModelError, PipelineError) as exc:
             raise HTTPException(status_code=502, detail="Planning provider could not produce a valid analysis plan. Please retry.") from exc
 
-        analysis_id = uuid4().hex
-        payload: dict[str, Any] = {
-            "analysis_id": analysis_id,
-            "dataset_id": request.dataset_id,
-            "question": question,
-            "succeeded": result.succeeded,
-            "exhausted": result.exhausted,
-            "unresolved_call_ids": list(result.unresolved_call_ids),
-            "steps": [step.as_dict() for step in result.steps],
-            "final_status": (
-                result.final_trace.verification_status.value
-                if result.final_trace is not None
-                else None
-            ),
-            "decision_brief": None,
-            "visualizations": [],
-        }
-
-        if result.succeeded:
-            brief = result.build_decision_brief()
-            visuals = result.build_visualizations()
-            payload["decision_brief"] = _brief_payload(brief)
-            payload["visualizations"] = [spec.as_dict() for spec in visuals]
-
-        encoded = jsonable_encoder(payload)
-        app.state.analyses[analysis_id] = encoded
-        return encoded
+    @app.post("/analyses/stream")
+    async def stream_analysis(request: AnalysisRequest) -> StreamingResponse:
+        dataset, question = analysis_input(request)
+        return StreamingResponse(
+            analysis_stream(analysis_id=uuid4().hex, dataset_id=request.dataset_id, question=question,
+                            dataset=dataset, planner_factory=app.state.planner_factory,
+                            analyses=app.state.analyses),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"},
+        )
 
     @app.get("/analyses/{analysis_id}")
     def get_analysis(analysis_id: str) -> dict[str, Any]:

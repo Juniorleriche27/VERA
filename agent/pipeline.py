@@ -8,6 +8,7 @@ from typing import Any, Mapping, Protocol, Sequence
 
 from agent.analytics_executor import AnalyticsToolExecutor
 from agent.data_binding import DatasetBinder
+from agent.events import AnalysisEventEmitter, tool_reference
 from agent.meta_planner import _safe_dataset_context
 from agent.replanning import ReplanningError, SelfCorrectionPlanner
 from agent.tool_call_trace import ToolCallTrace, TraceStatus, VerificationStatus
@@ -186,12 +187,15 @@ class VerifiedAnalyticsPipeline:
         *,
         dataset: Any,
         dataset_context: Mapping[str, Any],
+        events: AnalysisEventEmitter | None = None,
     ) -> PipelineResult:
         if not isinstance(question, str) or not question.strip():
             raise PipelineError("'question' must be a non-empty string.")
         if not isinstance(dataset_context, Mapping):
             raise PipelineError("'dataset_context' must be a mapping.")
 
+        emit = events.emit if events is not None else lambda *args, **kwargs: None
+        emit("planning_started")
         safe_context = _safe_dataset_context(dataset_context)
         selection = self.tool_selector.select(
             question.strip(),
@@ -213,10 +217,14 @@ class VerifiedAnalyticsPipeline:
             raise PipelineError("Planner returned duplicate tool call IDs.")
         if any(trace.source_call_ids for trace in planned_traces):
             raise PipelineError("Initial tool calls must be independent; lineage is assigned by replanning.")
+        emit("planning_completed", planning_turns=getattr(planning, "planning_turns", 1))
+        emit("tools_selected", calls=[tool_reference(trace) for trace in planned_traces])
 
         queue = list(planned_traces)
         steps: list[PipelineStep] = []
         next_replan_number = 1
+        if queue:
+            emit("execution_started")
 
         while queue and len(steps) < self.max_steps:
             trace = queue.pop(0)
@@ -226,6 +234,7 @@ class VerifiedAnalyticsPipeline:
             try:
                 bound = self.binder.bind(trace, dataset)
                 running = trace.mark_running()
+                emit("tool_started", tool=trace.tool, call_id=trace.call_id)
 
                 if hasattr(bound, "parameters") and hasattr(bound, "bindings"):
                     deterministic_result = self.analytics.execute(
@@ -242,9 +251,16 @@ class VerifiedAnalyticsPipeline:
             except Exception as exc:
                 failed = trace.fail(str(exc))
                 steps.append(PipelineStep(len(steps) + 1, failed, None))
+                emit("tool_failed", tool=trace.tool, call_id=trace.call_id)
                 continue
 
+            emit("tool_completed", tool=trace.tool, call_id=trace.call_id)
+            emit("verification_started", tool=trace.tool, call_id=trace.call_id)
             verified_trace, report = self.verifier.verify(completed)
+            emit("verification_completed", tool=trace.tool, call_id=trace.call_id,
+                 status=verified_trace.verification_status.value)
+            if verified_trace.verification_status is VerificationStatus.VERIFIED:
+                emit("tool_verified", tool=trace.tool, call_id=trace.call_id)
             outcome: ReplanningOutcome | None = None
             if verified_trace.verification_status in {
                 VerificationStatus.NEEDS_MORE_ANALYSIS,
@@ -293,6 +309,7 @@ class VerifiedAnalyticsPipeline:
                         else:
                             reserved_ids.add(next_id)
                             queue.insert(0, replanned_trace)
+                            emit("tool_planned", call=tool_reference(replanned_trace, "deterministic"))
                             next_replan_number += 1
                             outcome = ReplanningOutcome(
                                 "scheduled", verified_trace.call_id, decision,
@@ -312,12 +329,16 @@ class VerifiedAnalyticsPipeline:
                         verified_trace.trace_hash,
                     )
             steps.append(PipelineStep(len(steps) + 1, verified_trace, report, outcome))
+            if outcome is not None:
+                emit("replanning_completed", call_id=trace.call_id, status=outcome.status)
 
         exhausted = bool(queue) or any(
             step.replanning is not None
             and step.replanning.status == "max_steps_reached"
             for step in steps
         )
+        if planned_traces:
+            emit("execution_completed", exhausted=exhausted)
         return PipelineResult(
             question=question.strip(),
             planning=planning,

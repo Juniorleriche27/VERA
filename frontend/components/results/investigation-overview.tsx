@@ -5,15 +5,30 @@ import { toolLabel } from "@/lib/result-utils";
 export function InvestigationOverview({ analysis }: { analysis: AnalysisResponse }) {
   const verified = analysis.succeeded;
   const metrics = [
-    { label: "Analytical steps", value: analysis.steps.length, Icon: GitBranch },
-    { label: "Verified evidence", value: analysis.decision_brief?.evidence_count ?? 0, Icon: ShieldCheck },
-    { label: "Tools used", value: analysis.decision_brief?.tools_used?.length ?? 0, Icon: Layers3 },
+    { label: "Analyses", value: analysis.steps.length, Icon: GitBranch },
+    { label: "Verified", value: analysis.steps.filter(step => step.trace.status === "completed" && step.trace.verification_status === "verified").length, Icon: ShieldCheck },
     { label: "Visualizations", value: analysis.visualizations.length, Icon: FileBarChart2 },
+    { label: "Unresolved", value: analysis.unresolved_call_ids?.length ?? 0, Icon: Layers3 },
   ];
 
   return (
     <section aria-labelledby="overview-title" className="surface overflow-hidden">
-      <div className="border-b border-[#e4ebe5] px-5 py-7 sm:px-8 sm:py-8">
+      {/* Metrics Grid */}
+      <div className="grid grid-cols-2 gap-px bg-[#e5ebe5] lg:grid-cols-4">
+        {metrics.map(({ label, value, Icon }) => (
+          <div key={label} className="flex min-w-0 items-center gap-3 bg-[#fafcf9] px-4 py-3 sm:px-5">
+            <div className="hidden size-9 shrink-0 items-center justify-center rounded-lg bg-white text-[#538473] shadow-xs sm:flex">
+              <Icon size={17} />
+            </div>
+            <div>
+              <p className="eyebrow text-[9px]">{label}</p>
+              <p className="metric-number mt-1 text-2xl font-bold sm:text-[29px]">{value.toLocaleString()}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="border-b border-[#e4ebe5] px-5 py-4 sm:px-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-3">
             <div
@@ -45,7 +60,7 @@ export function InvestigationOverview({ analysis }: { analysis: AnalysisResponse
         </div>
 
         {/* Business question */}
-        <div className="mt-7 max-w-[950px] border-l-[3px] border-[#3b906f] pl-4">
+        <div className="mt-4 max-w-[950px] border-l-[3px] border-[#3b906f] pl-4">
           <p className="eyebrow mb-2">Business question</p>
           <p className="text-[16px] font-semibold leading-[1.7] tracking-[-.015em] text-[#283b31] sm:text-lg">
             {analysis.question}
@@ -54,7 +69,7 @@ export function InvestigationOverview({ analysis }: { analysis: AnalysisResponse
 
         {/* AI Tool Orchestration Chain Banner */}
         {analysis.steps.length > 0 && (
-          <div className="mt-6 flex flex-wrap items-center gap-2 rounded-xl border border-[#dfeae1] bg-[#f8fbf8] p-3 text-xs">
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-[#dfeae1] bg-[#f8fbf8] p-3 text-xs">
             <span className="eyebrow text-[9.5px] font-bold text-[#2d6f4f]">AI TOOL ORCHESTRATION:</span>
             <div className="flex flex-wrap items-center gap-1.5">
               {analysis.steps.map((step, idx) => {
@@ -90,20 +105,6 @@ export function InvestigationOverview({ analysis }: { analysis: AnalysisResponse
         )}
       </div>
 
-      {/* Metrics Grid */}
-      <div className="grid grid-cols-2 gap-px bg-[#e5ebe5] lg:grid-cols-4">
-        {metrics.map(({ label, value, Icon }) => (
-          <div key={label} className="flex min-w-0 items-center gap-3 bg-[#fafcf9] px-4 py-5 sm:px-7">
-            <div className="hidden size-9 shrink-0 items-center justify-center rounded-lg bg-white text-[#538473] shadow-xs sm:flex">
-              <Icon size={17} />
-            </div>
-            <div>
-              <p className="eyebrow text-[9px]">{label}</p>
-              <p className="metric-number mt-1 text-2xl font-bold sm:text-[29px]">{value.toLocaleString()}</p>
-            </div>
-          </div>
-        ))}
-      </div>
     </section>
   );
 }

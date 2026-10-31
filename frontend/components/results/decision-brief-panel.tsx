@@ -4,9 +4,9 @@ import { toolLabel } from "@/lib/result-utils";
 
 export function DecisionBriefPanel({ brief }: { brief: DecisionBrief }) {
   return <section id="decision-brief" aria-labelledby="decision-title" className="overflow-hidden rounded-2xl border border-[#cadcd0] bg-white shadow-[0_5px_25px_rgba(20,65,48,.04)]">
-    <div className="border-b border-[#e1eae3] bg-[#f0f7f1] px-5 py-6 sm:px-8 sm:py-8">
+    <div className="border-b border-[#e1eae3] bg-[#f0f7f1] px-5 py-5 sm:px-6 sm:py-5">
       <div className="flex items-center justify-between gap-4"><p className="eyebrow flex items-center gap-2 text-[#3e795c]"><BookOpenCheck size={15}/> VERIFIED DECISION BRIEF</p><span className="hidden rounded-full bg-white px-3 py-1.5 text-[10px] font-semibold text-[#4c705b] sm:inline">{brief.evidence_count} verified analyses</span></div>
-      <h3 id="decision-title" className="mt-5 max-w-5xl text-[clamp(1.35rem,2.4vw,2.15rem)] font-semibold leading-[1.45] tracking-[-.045em] text-[#213e2c]">{brief.headline}</h3>
+      <h3 id="decision-title" className="mt-4 max-w-6xl text-[clamp(1.25rem,1.7vw,1.6rem)] font-semibold leading-[1.45] tracking-[-.045em] text-[#213e2c]">{brief.headline}</h3>
       {brief.tools_used.length > 0 && <p className="mt-5 text-[11px] leading-6 text-[#6c8572]">Evidence from: {brief.tools_used.map(toolLabel).join(" · ")}</p>}
     </div>
     <div className="grid gap-8 px-5 py-7 sm:px-8 sm:py-9 lg:grid-cols-[1.45fr_1fr] lg:gap-12">
