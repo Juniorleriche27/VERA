@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, ChevronDown, CircleAlert, Copy, Fingerprint, Info, ShieldCheck, X } from "lucide-react";
 import type { AnalysisStep, EvidenceItem } from "@/types/vera";
 import { evidenceStep, shortHash, toolLabel } from "@/lib/result-utils";
@@ -10,6 +10,12 @@ function EvidenceRecord({ item, steps }: { item: EvidenceItem; steps: AnalysisSt
   const [copied, setCopied] = useState(false);
   const step = evidenceStep(item, steps);
   const checks = step?.report?.checks ?? [];
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 2200);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
 
   async function copyHash() {
     try {

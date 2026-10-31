@@ -1,11 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ArrowDownToLine, ArrowUpFromLine, CheckCircle2, FileText, LoaderCircle, Upload } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, CheckCircle2, FileText, LoaderCircle, Upload, Play } from "lucide-react";
 import type { DatasetUploadResponse } from "@/types/vera";
 
-export function DatasetUpload({ dataset, busy, error, onUpload }: {
+export function DatasetUpload({ dataset, busy, error, onUpload, onUseDemo, demoBusy }: {
   dataset: DatasetUploadResponse | null; busy: boolean; error: string | null; onUpload: (file: File) => void;
+  onUseDemo: () => void; demoBusy: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -45,8 +46,9 @@ export function DatasetUpload({ dataset, busy, error, onUpload }: {
       </div>}
       {error && <p className="form-error mt-4" role="alert">{error}</p>}
       <div className="mt-5 border-t border-[#e7ece7] pt-5">
-        <a href="/demo/vera_sales_campaign_demo.csv" download="vera_sales_campaign_demo.csv" className="group inline-flex items-center gap-2 text-[12px] font-bold text-[#216d57] hover:text-[#164936]"><ArrowDownToLine size={15}/>Download VERA demo dataset <span className="text-[#8fb3a5] transition group-hover:translate-x-0.5">↗</span></a>
-        <p className="mt-2 text-[11px] leading-5 text-[#8c978f]">Synthetic demonstration data · Upload after download</p>
+        <button type="button" disabled={busy} onClick={onUseDemo} className="flex w-full items-center justify-center gap-2.5 rounded-xl bg-[#176b57] px-4 py-3.5 text-[13px] font-bold text-white transition hover:bg-[#10533f] disabled:opacity-60">{demoBusy ? <LoaderCircle size={17} className="animate-spin"/> : <Play size={16}/>} {demoBusy ? "Loading official demo…" : "Use demo dataset"}</button>
+        <a href="/demo/vera_sales_campaign_demo.csv" download="vera_sales_campaign_demo.csv" className="group mt-3 inline-flex items-center gap-2 text-[11px] font-semibold text-[#607b68] hover:text-[#164936]"><ArrowDownToLine size={14}/>Download CSV <span aria-hidden="true">↗</span></a>
+        <p className="mt-2 text-[11px] leading-5 text-[#8c978f]">Synthetic demonstration data · Uploaded through the same API as any CSV</p>
       </div>
     </div>
   </section>;

@@ -2,7 +2,8 @@
 
 :root { color-scheme: light; --canvas: #f5f6f3; --ink: #182321; --muted: #6d7773; --stroke: #dce3dc; --primary: #176b57; }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; scroll-padding-top: 88px; }
+#investigation-path, #decision-brief, #visual-evidence, #provenance { scroll-margin-top: 88px; }
 body { margin: 0; background: var(--canvas); color: var(--ink); font-family: Arial, Helvetica, sans-serif; -webkit-font-smoothing: antialiased; }
 button, input, textarea { font: inherit; }
 button { cursor: pointer; }

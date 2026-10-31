@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUpRight, Check, Database, GitBranch, LockKeyhole, ShieldCheck } from "lucide-react";
+import { ArrowUpRight, Check, Database, GitBranch, LockKeyhole, RotateCcw, ShieldCheck } from "lucide-react";
+import { fetchDemoDataset } from "@/lib/demo-dataset";
 import { Header } from "@/components/header";
 import { DatasetUpload } from "@/components/dataset-upload";
 import { DatasetProfile } from "@/components/dataset-profile";
@@ -14,6 +15,8 @@ export function AppShell() {
   const [apiState, setApiState] = useState<"checking" | "connected" | "unavailable">("checking");
   const [dataset, setDataset] = useState<DatasetUploadResponse | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [sessionKey, setSessionKey] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
   const [analysisBusy, setAnalysisBusy] = useState(false);
@@ -62,6 +65,31 @@ export function AppShell() {
     finally { setUploadBusy(false); }
   }
 
+  async function loadOfficialDemo() {
+    if (uploadBusy || analysisBusy || demoBusy) return;
+    setDemoBusy(true);
+    setUploadError(null);
+    try {
+      const file = await fetchDemoDataset();
+      await upload(file);
+    } catch (error) {
+      setUploadError(readableError(error));
+    } finally {
+      setDemoBusy(false);
+    }
+  }
+
+  function resetInvestigation() {
+    if (uploadBusy || demoBusy || analysisBusy) return;
+    setDataset(null);
+    setQuestion("");
+    setAnalysis(null);
+    setUploadError(null);
+    setAnalysisError(null);
+    setSessionKey((value) => value + 1);
+    scrollOnResult.current = false;
+  }
+
   async function runAnalysis() {
     if (!dataset || !question.trim() || analysisBusy || uploadBusy) return;
     setAnalysisBusy(true); setAnalysis(null); setAnalysisError(null);
@@ -85,10 +113,10 @@ export function AppShell() {
         </div>
         <div className="hidden max-w-[260px] border-l border-[#d5dfd5] pl-6 lg:block"><p className="eyebrow mb-3">THE VERA METHOD</p><div className="space-y-2.5 text-[12px] font-semibold text-[#526359]"><p className="flex items-center gap-2"><GitBranch size={14} className="text-[#55947a]"/>AI analytical planning</p><p className="flex items-center gap-2"><Database size={14} className="text-[#55947a]"/>Deterministic analytics</p><p className="flex items-center gap-2"><ShieldCheck size={14} className="text-[#55947a]"/>Evidence verification</p></div></div>
       </div>
-      <div className="mb-7 mt-9 flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow mb-1.5">YOUR INVESTIGATION</p><h2 className="text-[22px] font-bold tracking-[-.055em]">From data to decision.</h2></div><div className="flex items-center gap-2 rounded-full border border-[#dbe5dd] bg-white px-4 py-2 text-[11px] font-semibold text-[#5e7967]"><Check size={13} className="text-[#267f58]"/> Built on verified evidence</div></div>
+      <div className="mb-7 mt-9 flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow mb-1.5">YOUR INVESTIGATION</p><h2 className="text-[22px] font-bold tracking-[-.055em]">From data to decision.</h2></div><div className="flex items-center gap-3">{(dataset || analysis) && <button type="button" onClick={resetInvestigation} disabled={uploadBusy || demoBusy || analysisBusy} className="inline-flex items-center gap-1.5 rounded-lg border border-[#d0ded3] bg-white px-3 py-2 text-[11px] font-bold text-[#53735d] hover:bg-[#eef5ef] disabled:opacity-50"><RotateCcw size={13}/> New investigation</button>}<div className="hidden items-center gap-2 rounded-full border border-[#dbe5dd] bg-white px-4 py-2 text-[11px] font-semibold text-[#5e7967] sm:flex"><Check size={13} className="text-[#267f58]"/> Built on verified evidence</div></div></div>
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,.92fr)_minmax(0,1.08fr)] lg:gap-6">
-        <div className="min-w-0"><DatasetUpload dataset={dataset} busy={uploadBusy || analysisBusy} error={uploadError} onUpload={upload}/>{dataset && <DatasetProfile dataset={dataset}/>}</div>
-        <div className="min-w-0"><QuestionComposer question={question} setQuestion={setQuestion} ready={Boolean(dataset) && !uploadBusy} busy={analysisBusy} onRun={() => void runAnalysis()}/></div>
+        <div className="min-w-0"><DatasetUpload key={sessionKey} dataset={dataset} busy={uploadBusy || demoBusy || analysisBusy} demoBusy={demoBusy} error={uploadError} onUpload={upload} onUseDemo={() => void loadOfficialDemo()}/>{dataset && <DatasetProfile dataset={dataset}/>}</div>
+        <div className="min-w-0"><QuestionComposer question={question} setQuestion={setQuestion} ready={Boolean(dataset) && !uploadBusy && !demoBusy} busy={analysisBusy} onRun={() => void runAnalysis()}/></div>
       </div>
       <div ref={resultsRef} className="scroll-mt-8"><AnalysisWorkspace analysis={analysis} busy={analysisBusy} error={analysisError}/></div>
       <div className="mt-14 flex flex-wrap items-center justify-between gap-4 border-t border-[#dce5dc] pt-6"><div className="flex items-center gap-2 text-[11px] text-[#819188]"><LockKeyhole size={14} className="text-[#388366]"/><span>Raw rows stay on the analytics backend. The planner sees safe metadata only.</span></div><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.1em] text-[#95a29a]">VERA / VERIFIABLE ANALYTICS <ArrowUpRight size={13}/></div></div>

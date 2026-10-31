@@ -22,10 +22,10 @@ export function InvestigationTimeline({ steps }: { steps: AnalysisStep[] }) {
   return <section id="investigation-path" className="surface px-5 py-6 sm:px-8 sm:py-7" aria-labelledby="path-title">
     <div className="mb-6 flex items-start justify-between gap-4"><div><p className="eyebrow mb-2">EXECUTED ANALYSES</p><h3 id="path-title" className="text-xl font-bold tracking-[-.04em]">Investigation path</h3><p className="mt-1.5 text-xs text-[#849187]">A verified record of completed tool calls and their decisions.</p></div><ListChecks size={19} className="mt-1 shrink-0 text-[#6b917f]"/></div>
     {steps.length === 0 ? <p className="rounded-xl bg-[#f5f7f5] p-5 text-sm text-[#7d897f]">No analytical steps were returned by the API.</p> :
-      <ol className="relative space-y-0">{steps.map((step, i) => <li key={`${step.trace.call_id}-${i}`} className="relative flex gap-4 pb-6 last:pb-0 sm:gap-5">
+      <ol className="relative space-y-0">{steps.map((step, i) => <li key={`${step.trace.call_id}-${i}`} className="relative flex gap-3 pb-3 last:pb-0 sm:gap-4">
         {i < steps.length - 1 && <span className="absolute left-[17px] top-10 bottom-0 w-px bg-[#dce6dd]" aria-hidden="true"/>}
         <span className="relative z-[1] flex size-9 shrink-0 items-center justify-center rounded-full border border-[#cbded1] bg-[#eff6f0] text-xs font-bold text-[#327257]">{step.index}</span>
-        <div className="min-w-0 flex-1 rounded-xl border border-[#e6ece6] bg-[#fcfdfb] p-4 sm:p-5">
+        <div className="min-w-0 flex-1 rounded-xl border border-[#e6ece6] bg-[#fcfdfb] p-3 sm:p-4">
           <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="text-[14px] font-bold text-[#253a2e]">{toolLabel(step.trace.tool)}</p><p className="mt-1 break-all font-mono text-[10px] text-[#829186]">{step.trace.tool}</p></div><div className="flex flex-wrap items-center gap-2"><ExecutionStatus status={step.trace.status}/>{step.trace.status !== "failed" && <VerificationBadge status={step.trace.verification_status}/>}</div></div>
           <p className="mt-3 text-[12px] leading-[1.6] text-[#637568]">{step.trace.objective}</p>
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[10px] text-[#9aa69e]"><span>ID: {step.trace.call_id}</span>{step.trace.trace_hash && <span>Hash: {shortHash(step.trace.trace_hash)}</span>}</div>
