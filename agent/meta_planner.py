@@ -120,6 +120,28 @@ def _normalized_catalog(
     return tuple(normalized)
 
 
+def _binding_guidance(name: str) -> str:
+    if name in {"linear_trend", "mean_shift_change_point", "variance_shift_change_point", "moving_average_trend", "additive_seasonal_decomposition"}:
+        return (
+            'Use bindings {"time_column":"date","value_column":"sales","aggregation":"sum"} '
+            "when the measure is additive; sum/mean must be deliberate. "
+            "Place window, period, threshold or min_segment_size in parameters, not bindings."
+        )
+    if name == "bayesian_structural_causal_impact":
+        return (
+            'Use bindings {"time_column":"date","value_column":"sales",'
+            '"aggregation":"sum","intervention_date":"2026-09-01",'
+            '"control_columns":["control_sales"]} if these columns and date exist. '
+            "Use value_column (the current Binder contract), not outcome_column. "
+            "Provide a date from the available context; never invent dates or controls."
+        )
+    if name in {"one_way_anova", "kruskal_wallis_test"}:
+        return 'Use bindings {"grouping_column":"region","value_column":"sales"} when roles match.'
+    if name == "mann_whitney_u_test":
+        return 'Use grouping_column, value_column and existing group_a/group_b names; never invent groups.'
+    return ""
+
+
 def build_meta_tools(
     catalog: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -136,6 +158,7 @@ def build_meta_tools(
             f"Analysis unit: {item['analysis_unit'] or 'unspecified'}.",
             "Bindings must contain column names or semantic references only; "
             "never raw dataset rows or raw value arrays.",
+            _binding_guidance(item["name"]),
         ]
         tools.append(
             {
@@ -276,7 +299,11 @@ class MetaModelPlanner:
         base_url: str = DEFAULT_BASE_URL,
         model: str = DEFAULT_MODEL,
         parallel_tool_calls: bool = True,
+        max_initial_calls: int = 4,
     ) -> None:
+        if isinstance(max_initial_calls, bool) or not isinstance(max_initial_calls, int) or max_initial_calls < 1:
+            raise MetaModelError("'max_initial_calls' must be a positive integer.")
+        self.max_initial_calls = max_initial_calls
         self.model = _required_text(model, "model")
         self.base_url = _required_text(base_url, "base_url")
         self.parallel_tool_calls = bool(parallel_tool_calls)
@@ -317,9 +344,22 @@ class MetaModelPlanner:
             "metadata and safe aggregates, not raw rows. Never request or invent "
             "raw dataset values. Put only column names or semantic references in "
             "bindings. Put method settings in parameters. Explain each tool call "
-            "with a concrete objective and reason. You may request multiple tools "
-            "when they are independently useful. If no analysis is needed, answer "
-            "briefly in plain text instead of inventing a tool call."
+            "with a concrete objective and reason. Decompose multi-part business "
+            "questions into complementary analytical evidence (trend, timing of "
+            "change, group comparison, and intervention when relevant). Diagnosis "
+            "of why sales declined is not the same as causal effect of a campaign. "
+            "Choose only tools necessary to cover the question; avoid redundant "
+            "tests. Prefer descriptive diagnostic, change localization, group "
+            "comparison, then intervention when the dataset supports these. "
+            "Request at most four independent initial tool calls to leave a fifth "
+            "execution slot for deterministic robustness replanning. Independent "
+            "calls should have empty source_call_ids: declare dependencies only "
+            "for genuine prior evidence, not artificial ordering (the runtime "
+            "cannot generally inject previous results into later tool inputs). "
+            "For additive sales or revenue sum may be appropriate, but never "
+            "guess aggregation for other measures. Never invent analytical results "
+            "or dates; local deterministic tools calculate actual values. "
+            "If no analysis is needed, answer briefly instead of inventing a call."
         )
         user_message = (
             "Business question:\n"
@@ -361,6 +401,10 @@ class MetaModelPlanner:
         finish_reason = str(getattr(choice, "finish_reason", "") or "")
         assistant_content = str(getattr(message, "content", "") or "")
         tool_calls = getattr(message, "tool_calls", None) or []
+        if len(tool_calls) > self.max_initial_calls:
+            raise MetaModelError(
+                f"Planner returned {len(tool_calls)} initial calls; maximum is {self.max_initial_calls}."
+            )
 
         traces: list[ToolCallTrace] = []
         seen_call_ids: set[str] = set()

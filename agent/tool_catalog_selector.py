@@ -120,7 +120,46 @@ class ToolCatalogSelector:
             ranked.append((score, name, tool))
 
         ranked.sort(key=lambda item: (-item[0], item[1]))
-        selected = ranked[: min(self.max_tools, len(ranked))]
+        # Reserve one compatible candidate per explicitly detected investigation
+        # dimension, then fill remaining slots by the usual global score. This
+        # never fabricates tools and does not inspect any dataset rows.
+        roles = {
+            str(column.get("role", "")).lower()
+            for column in dataset_context.get("columns", ())
+            if isinstance(column, Mapping)
+        }
+        has_series = {"time", "measure"} <= roles
+        has_groups = {"dimension", "measure"} <= roles
+        intents = self._investigation_intents(question_norm, roles)
+        representatives = {
+            "temporal": "linear_trend",
+            "change": "mean_shift_change_point",
+            "groups": "one_way_anova",
+            "causal": "bayesian_structural_causal_impact",
+        }
+        eligible = {
+            "temporal": has_series,
+            "change": has_series,
+            "groups": has_groups,
+            "causal": has_series,
+        }
+        by_name = {name: item for _, name, item in ranked}
+        reserved = [
+            name for intent, name in representatives.items()
+            if intent in intents and eligible[intent] and name in by_name
+        ][:self.max_tools]
+        selected = [(next(score for score, n, _ in ranked if n == name), name, by_name[name]) for name in reserved]
+        selected_names = set(reserved)
+        # A rank-based alternative can inform the model while preserving a
+        # family slot for the primary ANOVA; never replace reserved families.
+        for alternative in ("kruskal_wallis_test", "descriptive_statistics"):
+            useful = (alternative == "kruskal_wallis_test" and "groups" in intents and has_groups) or (
+                alternative == "descriptive_statistics" and "temporal" in intents and "measure" in roles
+            )
+            if useful and alternative in by_name and len(selected) < self.max_tools and alternative not in selected_names:
+                selected.append(next(row for row in ranked if row[1] == alternative))
+                selected_names.add(alternative)
+        selected += [row for row in ranked if row[1] not in selected_names][:max(0, self.max_tools - len(selected))]
         tools = tuple(dict(item[2]) for item in selected)
         names = tuple(item[1] for item in selected)
 
@@ -130,6 +169,24 @@ class ToolCatalogSelector:
             max_tools=self.max_tools,
             ranked_names=names,
         )
+
+    @staticmethod
+    def _investigation_intents(question: str, roles: set[str]) -> set[str]:
+        """Detect complementary analytic questions from words and safe roles."""
+        q = question
+        def contains(*phrases: str) -> bool:
+            return any(re.search(r"(?<!\w)" + re.escape(p) + r"(?!\w)", q) for p in phrases)
+
+        decline = contains("decline", "declining", "decrease", "decreased", "drop", "dropped", "fall", "falling", "baisse", "diminue", "diminué")
+        temporal = decline or contains("time", "over time", "trend", "date", "month", "week", "year", "growth", "trajectory", "evolution", "évolution", "tendance")
+        change = contains("when", "when did", "began", "start", "started", "start of decline", "change point", "changepoint", "shift", "break", "breakpoint", "structural change", "regime change", "sudden drop", "quand")
+        # Asking why a measured quantity declined also calls for determining
+        # when the decline began, but ordinary decline alone is not a break claim.
+        change = change or (decline and contains("why", "explain", "cause", "what changed", "pourquoi"))
+        groups = contains("region", "regions", "région", "régions", "segment", "segments", "product", "products", "channel", "channels", "group", "groups", "across", "compare", "difference", "contribution")
+        groups = groups or (decline and "dimension" in roles and contains("why", "explain", "cause", "pourquoi"))
+        causal = contains("campaign", "promotion", "intervention", "treatment", "impact", "effect", "effective", "causal", "campagne")
+        return {name for name, active in (("temporal", temporal), ("change", change), ("groups", groups), ("causal", causal)) if active}
 
     @staticmethod
     def _intent_bonus(name: str, question: str) -> float:
@@ -204,6 +261,10 @@ class ToolCatalogSelector:
 
         if "time series" in name_norm and temporal:
             score += 10.0
+        if name_norm == "linear trend" and any(x in question for x in ("decline", "decrease", "drop", "fall", "growth", "trend", "tendance", "baisse")):
+            score += 22.0
+        if name_norm == "mean shift change point" and any(x in question for x in ("decline", "drop", "when", "began", "shift", "changed", "break", "baisse")):
+            score += 17.0
 
         if name_norm == "descriptive statistics" and summary:
             score += 18.0

@@ -205,6 +205,8 @@ class VerifiedAnalyticsPipeline:
         planned_traces = tuple(getattr(planning, "traces", ()) or ())
         if not all(isinstance(trace, ToolCallTrace) for trace in planned_traces):
             raise PipelineError("Planner returned an invalid trace collection.")
+        if len(planned_traces) > 4:
+            raise PipelineError("Planner returned more than four initial tool calls; refusing to truncate silently.")
 
         queue = list(planned_traces)
         steps: list[PipelineStep] = []
