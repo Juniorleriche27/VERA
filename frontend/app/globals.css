@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+:root { color-scheme: light; --canvas: #f5f6f3; --ink: #182321; --muted: #6d7773; --stroke: #dce3dc; --primary: #176b57; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--canvas); color: var(--ink); font-family: Arial, Helvetica, sans-serif; -webkit-font-smoothing: antialiased; }
+button, input, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+:focus-visible { outline: 3px solid #409d81; outline-offset: 3px; }
+::selection { background: #badbc9; color: #163c32; }
+.surface { border: 1px solid var(--stroke); background: #fff; border-radius: 16px; box-shadow: 0 4px 18px rgba(24,35,33,.025); }
+.eyebrow { font-size: 10px; letter-spacing: .18em; line-height: 1.5; font-weight: 750; text-transform: uppercase; color: #79847d; }
+.form-error { border: 1px solid #f1ccc5; background: #fff4f1; color: #a13c2e; border-radius: 10px; font-size: 13px; padding: 10px 12px; }
+.status-dot { width: 7px; height: 7px; border-radius: 100%; display: inline-block; flex: none; }
+.status-dot--on { background: #20a078; box-shadow: 0 0 0 3px #d5f4e7; }
+.status-dot--off { background: #de8062; box-shadow: 0 0 0 3px #fff0e9; }
+.status-dot--busy { background: #b89448; box-shadow: 0 0 0 3px #f8efd7; }
+.input-card { transition: border-color .2s, background-color .2s; }
+.input-card:hover { border-color: #98bbb0; }
+.input-card.is-dragging { border-color: var(--primary); background: #eef8f1; }
+.metric-number { font-variant-numeric: tabular-nums; letter-spacing: -.04em; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; scroll-behavior: auto !important; transition-duration: .01ms !important; } }
