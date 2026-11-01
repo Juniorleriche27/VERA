@@ -33,7 +33,7 @@ campaign_spend = 0 if i < 31 else 45
 3. `one_way_anova` — compare sales across `region`.
 4. `bayesian_structural_causal_impact` — aggregate `sales` and `control_sales` by day with `sum`; intervention index resolved **exactly** from 2026-09-01.
 
-The offline runner uses `DemoPlanner` with fixed IDs `demo-trend`, `demo-change`, `demo-regions` and `demo-campaign`. It runs the real Binder, Executor, Verifier, deterministic Decision Brief and verified Visualization Builder. It does **not** exercise the external LLM; the runtime Groq planner and providers are unchanged. The E2E tests additionally exercise `POST /datasets`, `POST /analyses` and `GET /analyses/{analysis_id}` with this exact CSV.
+The offline runner uses `DemoPlanner` with fixed IDs `demo-trend`, `demo-change`, `demo-regions` and `demo-campaign`. It runs the real Binder, Executor, Verifier, deterministic Decision Brief and verified Visualization Builder. It does **not** exercise the external LLM; the live application uses `MetaModelPlanner` and requires `MODEL_API_KEY`. The E2E tests additionally exercise `POST /datasets`, `POST /analyses` and `GET /analyses/{analysis_id}` with this exact CSV.
 
 ```bash
 PYTHONPATH=. python scripts/run_demo_scenario.py

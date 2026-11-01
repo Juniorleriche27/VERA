@@ -4,8 +4,7 @@ from threading import Event
 from typing import Any, AsyncIterator, Callable
 
 from agent.events import AnalysisCancelled, AnalysisEvent, AnalysisEventEmitter
-from agent.groq_planner import GroqModelError
-from agent.meta_planner import MetaModelError
+from agent.meta_planner import MetaModelConfigurationError, MetaModelError
 from agent.pipeline import PipelineError
 from backend.analysis import run_analysis
 
@@ -36,7 +35,7 @@ async def analysis_stream(*, analysis_id: str, dataset_id: str, question: str,
         except AnalysisCancelled:
             return
         except Exception as exc:
-            code = ('configuration_error' if isinstance(exc, GroqModelError) else
+            code = ('configuration_error' if isinstance(exc, MetaModelConfigurationError) else
                     'planning_failed' if isinstance(exc, (MetaModelError, PipelineError)) else 'analysis_error')
             try:
                 events.emit('analysis_failed', code=code)

@@ -9,8 +9,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from agent.groq_planner import GroqModelError, GroqModelPlanner
-from agent.meta_planner import MetaModelError
+from agent.meta_planner import MetaModelConfigurationError, MetaModelError, MetaModelPlanner
 from agent.pipeline import PipelineError
 from fastapi.responses import StreamingResponse
 from backend.analysis import _brief_payload, run_analysis
@@ -82,7 +81,7 @@ def create_app(
     app.state.settings = config
     app.state.datasets = {}
     app.state.analyses = {}
-    app.state.planner_factory = planner_factory or GroqModelPlanner
+    app.state.planner_factory = planner_factory or MetaModelPlanner
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -174,7 +173,7 @@ def create_app(
                 analysis_id=uuid4().hex, dataset_id=request.dataset_id, question=question,
                 dataset=dataset, planner_factory=app.state.planner_factory, analyses=app.state.analyses,
             )
-        except GroqModelError as exc:
+        except MetaModelConfigurationError as exc:
             raise HTTPException(status_code=503, detail="Planning provider is not configured.") from exc
         except (MetaModelError, PipelineError) as exc:
             raise HTTPException(status_code=502, detail="Planning provider could not produce a valid analysis plan. Please retry.") from exc

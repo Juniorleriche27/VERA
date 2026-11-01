@@ -197,7 +197,7 @@ def test_single_meta_tool_call_becomes_planned_trace():
 
     assert len(result.traces) == 1
     trace = result.traces[0]
-    assert trace.call_id == "call-1"
+    assert trace.call_id == "planning-1-call-1"
     assert trace.tool == "one_way_anova"
     assert trace.parameters == {}
     assert trace.bindings == {
@@ -224,8 +224,8 @@ def test_parallel_meta_tool_calls_are_preserved():
     )
 
     assert [trace.call_id for trace in result.traces] == [
-        "call-1",
-        "call-2",
+        "planning-1-call-1",
+        "planning-1-call-2",
     ]
     assert [trace.tool for trace in result.traces] == [
         "descriptive_statistics",

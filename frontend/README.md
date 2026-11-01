@@ -10,7 +10,7 @@ From the repository root, start the existing FastAPI backend in another terminal
 PYTHONPATH=. uvicorn backend.app:app --host 127.0.0.1 --port 8000
 ```
 
-The backend's default runtime planner is **Groq**, which requires its existing backend-only configuration. No provider secrets are read by the frontend. The local API CORS default allows `http://localhost:3000` (use this hostname for the frontend or configure `VERA_CORS_ORIGINS` on the backend as appropriate).
+The backend's default runtime planner is **MetaModelPlanner**, using Meta Model API and the backend-only `MODEL_API_KEY` environment variable. No provider secrets are read by the frontend. The local API CORS default allows `http://localhost:3000` (use this hostname for the frontend or configure `VERA_CORS_ORIGINS` on the backend as appropriate).
 
 ```bash
 cd frontend

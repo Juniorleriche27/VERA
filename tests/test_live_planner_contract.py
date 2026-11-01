@@ -5,7 +5,6 @@ import pandas as pd
 import pytest
 
 from agent.analytics_executor import AnalyticsToolExecutor
-from agent.groq_planner import GroqModelPlanner
 from agent.meta_planner import MetaModelError, MetaModelPlanner, _safe_dataset_context, build_meta_tools
 from backend.app import _safe_dataset_profile
 from scripts.run_demo_scenario import load_demo_dataset
@@ -13,9 +12,9 @@ from tests.test_meta_planner import _FakeClient, _response, _tool_call
 
 
 def test_provider_instruction_roles_remain_explicit_and_portable():
-    for planner_class, expected in [(MetaModelPlanner, 'developer'), (GroqModelPlanner, 'system')]:
+    for expected in ['developer', 'system']:
         client = _FakeClient(_response(content='No analysis', finish_reason='stop'))
-        planner_class(client=client).plan('Inspect', dataset_context={}, tool_catalog=[{'name': 'linear_trend'}])
+        MetaModelPlanner(client=client, instruction_role=expected).plan('Inspect', dataset_context={}, tool_catalog=[{'name': 'linear_trend'}])
         assert client.chat.completions.calls[0]['messages'][0]['role'] == expected
     with pytest.raises(MetaModelError):
         MetaModelPlanner(client=object(), instruction_role='user')
@@ -86,10 +85,10 @@ def test_causal_tool_guidance_does_not_supply_a_fabricated_intervention_year():
     assert 'temporal metadata' in definition
 
 
-def test_groq_uses_low_sampling_temperature_without_changing_meta_default_request():
-    for planner_class, expected in [(MetaModelPlanner, None), (GroqModelPlanner, 0.0)]:
+def test_sampling_temperature_is_optional_and_explicit():
+    for expected in [None, 0.0]:
         client = _FakeClient(_response(content='No analysis', finish_reason='stop'))
-        planner_class(client=client).plan('Inspect', dataset_context={}, tool_catalog=[{'name': 'linear_trend'}])
+        MetaModelPlanner(client=client, temperature=expected).plan('Inspect', dataset_context={}, tool_catalog=[{'name': 'linear_trend'}])
         assert client.chat.completions.calls[0].get('temperature') == expected
 
 

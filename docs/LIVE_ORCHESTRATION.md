@@ -1,8 +1,4 @@
-# Live verifiable orchestration — final UX validation
-
-Starting SHA: `809bbc67de92f4daef063030f0e1399e66bcf983`, branch `main`.
-The initial working tree contained only a generated `frontend/next-env.d.ts`
-dev-path modification; it is preserved outside this change.
+# Live verifiable orchestration
 
 ## Architecture and API compatibility
 
@@ -22,9 +18,8 @@ dev-path modification; it is preserved outside this change.
 - `Cache-Control: no-store, no-transform` and `X-Accel-Buffering: no` discourage
   intermediary caching/buffering. No polling or analysis replay is used.
 
-The same observer works with every `PlanningProvider`, including the existing
-Meta planner. Groq configuration remains Qwen, system, parallel true, temperature
-zero and bounded planning. No planner implementation or setting was changed.
+The observer is independent of the planning provider. The default runtime uses
+`MetaModelPlanner`; see [Meta integration](META_MODEL_API.md).
 
 ## Event contract and true generation points
 
@@ -99,68 +94,18 @@ follow-ups are identified separately from AI-selected calls.
 - AbortController cleanup prevents stale stream updates after unmount; an
   immediate ref guard prevents duplicate submits before React state rerenders.
 
-## Verification evidence
+## Verification scope
 
-Backend: **469 tests passed** (457 retained + 12 new cases). New tests cover
-causal ordering, callback placement before execution, four tools, unchanged
-observed-vs-unobserved hashes, safe planning failures, binding failures, executor
-failures, no tools, response compatibility, closed payload fields, validation
-before headers, disconnection and deterministic replanning origin/verdicts.
-Two warnings refer to the existing deprecated FastAPI 422 alias.
+Offline and injected-client tests cover causal event ordering, four-tool execution,
+matching observed/unobserved hashes, safe planning failures, binding/execution
+failures, empty plans, disconnection and deterministic replanning origins.
+Frontend tests cover SSE parsing, event ordering and identity, retained progress,
+safe errors, interruption, and final evidence/provenance presentation.
 
-Frontend: **27 tests passed** (12 retained + 15 new cases). New tests cover
-initial/connecting, planning, selection, running, completed/verified/failed,
-deterministic origin, retained history, interrupted connections, exhausted
-execution, SSE chunk/CRLF decoding, ordering, analysis identity, safe errors,
-unknown/prototype fields, and final Brief/provenance hierarchy.
-
-`npm install`, lint, typecheck, test, demo integrity and production build passed.
-Source and production frontend bundle secret-pattern scans found zero candidates;
-`.env` remains ignored. Captured live events contain no bindings or provider keys.
-No production dependency or lockfile changed. Browser tooling and fixtures were
-installed only under `/tmp`, not added to the application.
-
-The offline demo still produces four VERIFIED analyses and four charts. Full
-trace/result/hash, Decision Brief and visualization snapshots compare identical
-to the historical baseline. Both CSV copies retain SHA-256:
-`65a3c77850475f248f455d87a2a8b2852c772a1988dcbaeacce636229a8764f6`.
-
-Real Chromium browser QA exercised:
-
-- 1920×1080, 1440×900, 1366×768; mobile 390×844 without horizontal overflow.
-- Demo upload → exact official question → SSE → final metrics, brief, charts
-  and expandable provenance.
-- API unavailable, actual invalid-date CSV, planning exception, failed binding
-  and empty plan. Failure fixtures use the actual pipeline and event emitter,
-  never pre-recorded or fabricated SSE. No QA controls enter production code.
-- Real Groq calls through frontend/backend, including the usual ports 3000/8000.
-  All four expected analyses VERIFIED, four charts, zero unresolved.
-- Two immediate button clicks produced one analysis request. No uncaught browser
-  errors in the passing scenarios. Trace/report and chart/evidence hashes match.
-
-Recorded real run on ports 3000/8000 (browser receive times from the CTA action):
-
-| Measurement | Observed |
-| --- | ---: |
-| First event | 11.0 ms |
-| planning_started | 433.4 ms |
-| First tools_selected | 3775.0 ms |
-| First tool_started | 3791.2 ms |
-| First VERIFIED | 3796.2 ms |
-| Terminal analysis_completed | 3803.4 ms |
-| Events received | 31 |
-| Distinct rendered live-panel states | 10 |
-
-An additional warm isolated live run completed in 2988.6 ms. These are observed
-samples, not performance guarantees. Several tool events shared a network read;
-backend timestamps still distinguish their real execution boundaries. The final
-result is fetched only after the terminal event.
-
-Screenshots were inspected locally under `/tmp/vera-live-ui-captures/` and final
-views copied to `~/.codex/artifacts/vera-live-orchestration/`, including
-planning, retained completed history, final results, each desktop/mobile size,
-and failure states. No video was started. The normal frontend on port 3000 now serves the validated
-production build; the backend on port 8000 was restarted to load the new route.
+These checks exercise actual pipeline events with injected planning responses.
+They do not establish live Meta availability or model-selection quality. Run the
+optional Meta diagnostic with official credentials for that validation. The offline
+demo separately verifies reproducible traces, Decision Brief and chart specifications.
 
 ## Remaining operational limits
 
@@ -174,11 +119,5 @@ production build; the backend on port 8000 was restarted to load the new route.
 - A dropped stream is reported and its received history retained. No automatic
   reconnect duplicates an analysis. Proxy buffering/idle timeout settings still
   matter outside the local environment; no public-production sign-off implied.
-- Existing model/network/quota variability and 16 moderate npm development-tool
-  advisories remain as documented in the preceding audit; no forced upgrades.
-- The pre-existing generated `frontend/next-env.d.ts` local change is preserved
-  outside the commit, so it can remain the sole working-tree difference.
-
-**READY FOR VIDEO RECORDING** after successful final validation. Statistical
-engines, verifier, Decision Brief rules, official CSV and historical hashes are
-unchanged. Groq retained; no Meta-only migration and no recording performed.
+- Model availability, network and account quota still determine live planning
+  availability. Injected-client validation does not certify a live Meta request.

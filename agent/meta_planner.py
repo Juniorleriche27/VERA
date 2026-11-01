@@ -713,9 +713,14 @@ class MetaPlanningResult:
         }
 
 
+class MetaModelConfigurationError(MetaModelError):
+    """Missing runtime configuration; safe to classify separately from planning failures."""
+
+
 class MetaModelPlanner:
     """Privacy-preserving Meta Model API planner for VERA analytics tools."""
 
+    provider = "meta_model_api"
     DEFAULT_BASE_URL = "https://api.meta.ai/v1"
     DEFAULT_MODEL = "muse-spark-1.3"
 
@@ -729,7 +734,7 @@ class MetaModelPlanner:
         parallel_tool_calls: bool = True,
         max_initial_calls: int = 4,
         instruction_role: str = "developer",
-        max_planning_turns: int = 1,
+        max_planning_turns: int = 4,
         temperature: float | None = None,
     ) -> None:
         if isinstance(max_initial_calls, bool) or not isinstance(max_initial_calls, int) or max_initial_calls < 1:
@@ -738,7 +743,7 @@ class MetaModelPlanner:
         if isinstance(max_planning_turns, bool) or not isinstance(max_planning_turns, int) or not 1 <= max_planning_turns <= 4:
             raise MetaModelError("'max_planning_turns' must be an integer between 1 and 4.")
         self.max_planning_turns = max_planning_turns
-        if max_planning_turns > 1 and max_initial_calls > 4:
+        if max_initial_calls > 4:
             raise MetaModelError("Bounded planning accepts at most four total analytical calls.")
         if temperature is not None and (
             isinstance(temperature, bool) or not isinstance(temperature, (int, float))
@@ -756,13 +761,13 @@ class MetaModelPlanner:
         if client is None:
             key = api_key or os.environ.get("MODEL_API_KEY")
             if not key:
-                raise MetaModelError(
+                raise MetaModelConfigurationError(
                     "MODEL_API_KEY is required when no client is injected."
                 )
             try:
                 from openai import OpenAI
             except ImportError as exc:
-                raise MetaModelError(
+                raise MetaModelConfigurationError(
                     "The 'openai' package is required for Meta Model API access."
                 ) from exc
             client = OpenAI(base_url=self.base_url, api_key=key)

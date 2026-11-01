@@ -182,9 +182,9 @@ def test_api_serializes_dataclass_brief_with_derived_evidence_metadata():
 
 
 def test_provider_configuration_error_is_safe_and_actionable():
-    from agent.groq_planner import GroqModelError
+    from agent.meta_planner import MetaModelConfigurationError
     def factory():
-        raise GroqModelError('PRIVATE_CONFIG')
+        raise MetaModelConfigurationError('PRIVATE_CONFIG')
     client = TestClient(create_app(planner_factory=factory))
     dataset = client.post('/datasets', files={'file': ('x.csv', b'region,sales\nA,1\nB,2\n')}).json()
     response = client.post('/analyses', json={'dataset_id': dataset['dataset_id'], 'question': 'Compare'})

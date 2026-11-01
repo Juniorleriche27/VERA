@@ -17,7 +17,7 @@ Safe dataset metadata (no raw rows)
       ↓
 ToolCatalogSelector  (local, deterministic pre-filter)
       ↓
-LLM planner  (GroqModelPlanner / MetaModelPlanner)
+Meta model analytical planning  (MetaModelPlanner)
       ↓
 DatasetBinder  (semantic column → local raw values)
       ↓
@@ -38,7 +38,9 @@ Verified visualisations
 FastAPI  →  Next.js frontend
 ```
 
-**Core principle:** The LLM selects analyses. It does not compute statistics.
+**VERA uses Meta models for AI analytical planning.**
+
+The Meta model selects analytical tools and their semantic bindings. It never computes the statistical results itself. All numerical analysis is executed deterministically by VERA and independently verified before being presented as evidence.
 
 ---
 
@@ -67,53 +69,76 @@ visualization, UI/API work, and the following analytical extensions are new:
 
 ---
 
-## Quick start — backend
+## Hackathon setup
 
-### Prerequisites
-- Python 3.12
-- A Python virtual environment with the packages from `requirements.txt` installed.
+Use Python 3.12 and Node.js 20.9 or newer. In the backend terminal:
 
 ```bash
+git clone https://github.com/Juniorleriche27/VERA.git
+cd VERA
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements-dev.txt
-```
-
-```bash
-# With the virtual environment activated and GROQ_API_KEY exported:
-cd ~/VERA
+python -m pip install -r requirements.txt
+export MODEL_API_KEY="YOUR_META_MODEL_API_KEY"
 PYTHONPATH=. uvicorn backend.app:app --host 0.0.0.0 --port 8000
 ```
 
-The API will be available at `http://localhost:8000`.
+In a second terminal, from the cloned repository:
 
-### Environment variables
+```bash
+cd frontend
+npm ci
+npm run dev
+```
 
-`.env.example` lists backend settings. Export these variables in the backend
-process environment before starting uvicorn; this command does not load `.env`
-automatically. Docker's `--env-file .env` loads them explicitly.
+Open `http://localhost:3000`, upload `demo/vera_sales_campaign_demo.csv`, and
+ask: **Why did our sales decline, and did the September campaign actually help?**
+The live application calls Meta for planning; analysis and verification run locally.
+Use one API worker because dataset and analysis storage are process-local.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GROQ_API_KEY` | *(required)* | Groq API key for the LLM planner |
-| `VERA_APP_NAME` | `VERA API` | Displayed application name |
-| `VERA_APP_VERSION` | `0.1.0` | API version string |
-| `VERA_ENV` | `development` | Runtime environment |
-| `VERA_CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed CORS origins |
-| `VERA_MAX_UPLOAD_BYTES` | `26214400` | Maximum CSV upload size (bytes) |
+### Official Meta provider
 
-The default API planner remains Groq. `MetaModelPlanner` is available for explicit
-integration and uses `MODEL_API_KEY`; its configured endpoint and model still
-require a live provider check. Switching the API provider is not automatic.
+The default is `MetaModelPlanner`, using Meta Model API at
+`https://api.meta.ai/v1`, model **`muse-spark-1.3`**, and the backend-only
+**`MODEL_API_KEY`** credential. The OpenAI Python SDK is an API-compatible
+transport to Meta, not a separate inference provider.
 
-Groq currently uses `qwen/qwen3.8-27b`, the `system` instruction role,
-`parallel_tool_calls=True` and temperature zero. Planning uses at most four
-responses and four analytical calls: it requests only uncovered objectives after
-a partial response, and rejects incomplete or duplicate plans. Simple questions
-do not automatically expand to four tools. No observations or execution results
-are sent back to the planner. Temporal profiles include timestamp bounds;
-repeated timestamps require an explicit model-selected aggregation. See the
-[live diagnosis and measured results](docs/GROQ_LIVE_DIAGNOSTIC.md).
+The request uses Chat Completions, a `developer` instruction message, nested
+function `tools`, `tool_choice="auto"` and `parallel_tool_calls=True`. Sampling
+parameters are omitted by default. Official Meta documentation confirms this
+[protocol and model](https://dev.meta.ai/docs/protocols/chat-completions) and
+[tool-calling contract](https://dev.meta.ai/docs/tool-calling).
+
+Planning is bounded to four responses and four analytical calls. Continuations
+request only uncovered objectives; duplicate or incomplete plans are rejected.
+Simple questions do not automatically expand to four tools. No observations or
+execution results are sent back to Meta. Temporal profiles include timestamp
+bounds; repeated timestamps require an explicit model-selected aggregation.
+There is no automatic provider fallback.
+
+`.env.example` contains the single required credential name. Export it before
+starting the backend; uvicorn does not automatically load `.env`. Never put this
+key in frontend configuration. Without it, import, health and CSV upload work;
+analysis returns a safe configuration error (HTTP 503 or SSE `configuration_error`).
+
+Optional application settings retain their defaults: `VERA_APP_NAME=VERA API`,
+`VERA_APP_VERSION=0.1.0`, `VERA_ENV=development`,
+`VERA_CORS_ORIGINS=http://localhost:3000`, `VERA_MAX_UPLOAD_BYTES=26214400`.
+No extra model settings are required.
+
+### Optional live Meta diagnostic
+
+With the virtual environment active and `MODEL_API_KEY` exported:
+
+```bash
+PYTHONPATH=. python scripts/diagnose_meta_planner.py
+```
+
+This sends a minimal request, then tests real function calling through CSV upload,
+planning, local execution and verification. It reports `SUCCESS` / `FAILED` with
+nonzero exit on failure, without displaying credentials or provider payloads.
+A real Meta credential is required; injected-client tests and the offline demo
+do not certify a live Meta call. See [Meta integration notes](docs/META_MODEL_API.md).
 
 ---
 
@@ -139,12 +164,13 @@ to the backend URL (default: `http://127.0.0.1:8000`).
 ### Backend (Python)
 
 ```bash
-cd ~/VERA
+python -m pip install -r requirements-dev.txt
 PYTHONPATH=. python -m pytest -q -p no:asyncio
 ```
 
-The original baseline was **380 passed**; final audit and live-planner regressions are included
-in the current suite (see `docs/FINAL_TECHNICAL_AUDIT.md`).
+The suite includes provider-contract, bounded-planning, no-key startup, injected
+Meta-client integration and analytical regression tests. See
+[technical guarantees](docs/FINAL_TECHNICAL_AUDIT.md).
 
 ### Frontend
 
@@ -161,12 +187,15 @@ Expected: **27 frontend tests** passing, no lint errors, clean build.
 
 ---
 
-## Official demo scenario (no LLM or network required)
+## Offline deterministic demo (no LLM or network required)
 
 ```bash
 cd ~/VERA
 PYTHONPATH=. python scripts/run_demo_scenario.py
 ```
+
+This fixed-plan demo checks analytical reproducibility. It does not call Meta or
+replace validation of the live application with a real Meta credential.
 
 **Dataset:** `demo/vera_sales_campaign_demo.csv` (synthetic data)
 
